@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="sv" data-theme="legacy">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#08122f" />
+    <meta name="color-scheme" content="dark" />
+    <title>FAQ – Quill</title>
+    <meta
+      name="description"
+      content="Vanliga frågor om Quill, integritet, utskick och projektet."
+    />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <link rel="canonical" href="https://__PUBLIC_HOST__/faq.html" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/favicon-192.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/nocturne.css" />
+    <link rel="stylesheet" href="/quill.css" />
+    <link rel="stylesheet" href="/civic-theme.css" />
+    <link rel="stylesheet" href="/civic-polish.css" />
+    <script src="/theme.js"></script>
+    <script src="/pwa.js" defer></script>
+    <link rel="stylesheet" href="/theme.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#faq-main">Hoppa till innehållet</a>
+    <div class="service-band">
+      <div class="service-band__inner">
+        <span>Svensk demokratitjänst</span>
+        <span>Oberoende · partipolitiskt neutral · inte en myndighet</span>
+      </div>
+    </div>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="/" aria-label="Quill – startsida">
+          <img class="brand__logo" src="/brand-logo.svg" alt="Quill" />
+        </a>
+        <nav class="primary-nav" aria-label="Huvudnavigering"></nav>
+        <div class="header-actions">
+          <a class="button button--secondary faq-home-link" href="/">Till startsidan</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="faq-main" class="page page--narrow" tabindex="-1">
+      <div class="stack">
+        <header class="page-head">
+          <div class="card__eyebrow">Quill</div>
+          <h1>Vanliga frågor</h1>
+          <p>Om utskick, kontaktuppgifter, integritet och projektet.</p>
+        </header>
+
+        <details class="details" open>
+          <summary>Vad är Quill?</summary>
+          <p>
+            Quill är ett gratis verktyg som gör det enklare att kontakta folkvalda, även
+            när många mottagare behöver nås samtidigt. Du väljer själv mottagare och innehåll.
+            Tjänsten tillhandahåller verktyget och tar inte politisk ställning.
+          </p>
+        </details>
+
+        <details class="details">
+          <summary>Vem står som avsändare?</summary>
+          <p>
+            Du gör det. Breven skickas via ett e-postkonto som du själv kopplar, så din egen
+            e-postadress används som avsändare. Quill skickar inte brevet i eget namn.
+          </p>
+        </details>
+
+        <details class="details">
+          <summary>Varifrån kommer kontaktuppgifterna?</summary>
+          <p>
+            Kontaktuppgifterna sammanställs från offentliga källor. Uppgifter kan ändras, så
+            kontrollera gärna mottagaren om ett meddelande studsar eller verkar inaktuellt.
+          </p>
+        </details>
+
+        <details class="details" id="integritet">
+          <summary>Hur hanteras personlig integritet?</summary>
+          <div class="stack">
+            <div>
+              <h3>Dataminimering</h3>
+              <p>
+                Ett konto kräver i grunden en e-postadress. Tjänsten behöver inte namn,
+                personnummer, bostadsadress eller telefonnummer för att fungera.
+              </p>
+            </div>
+            <div>
+              <h3>Mailanslutningar</h3>
+              <p>
+                Anslutningsuppgifter skyddas och används för att skicka via det konto du själv har
+                kopplat.
+              </p>
+            </div>
+            <div>
+              <h3>Brev</h3>
+              <p>
+                Brevinnehåll lagras så länge det behövs för utskicket och omfattas av tjänstens
+                retention och dataminimering.
+              </p>
+            </div>
+            <div>
+              <h3>GDPR</h3>
+              <p>
+                Läs mer hos
+                <a
+                  href="https://www.imy.se/verksamhet/dataskydd/det-har-galler-enligt-gdpr/introduktion-till-gdpr/dataskyddsforordningen-i-fulltext/"
+                  rel="noopener noreferrer"
+                  >Integritetsskyddsmyndigheten</a
+                >
+                eller i
+                <a href="https://eur-lex.europa.eu/eli/reg/2016/679/oj" rel="noopener noreferrer"
+                  >EU:s officiella GDPR-text</a
+                >.
+              </p>
+            </div>
+          </div>
+        </details>
+
+        <details class="details">
+          <summary>Vilka dokument kan importeras?</summary>
+          <p>
+            TXT, HTML och DOCX kan användas som brevtext. PDF kan bifogas till utskick.
+            DOCX-konvertering laddas endast när funktionen faktiskt används.
+          </p>
+        </details>
+
+        __DONATION_HTML__
+      </div>
+    </main>
+    <footer class="page-theme-footer" aria-label="Tema">
+      <div class="page-theme-footer__inner">
+        <label class="theme-control" for="theme-select"
+          ><span>Tema</span
+          ><select id="theme-select" aria-label="Tema">
+            <option value="legacy">Legacy</option>
+            <option value="forest">__SITE_FAMILY__</option>
+            <option value="blackout">Blackout</option>
+          </select></label
+        >
+      </div>
+    </footer>
+    <script src="/faq.js" defer></script>
+  </body>
+</html>

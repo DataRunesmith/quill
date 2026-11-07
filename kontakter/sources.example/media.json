@@ -1,0 +1,39 @@
+{
+  "contacts": [
+    {
+      "name": "Exempeltidningen Nyheter",
+      "email": "nyheter@exempeltidningen.example",
+      "organisation": "Exempeltidningen",
+      "role": "Nyhetsredaktion",
+      "source": "https://www.exempeltidningen.example/kontakt"
+    }
+  ],
+  "staff_pages": [
+    {
+      "url": "https://www.exempeltidningen.example/granskning/kontakt",
+      "organisation": "Exempeltidningen",
+      "role": "Granskning",
+      "domain": "exempeltidningen.example"
+    }
+  ],
+  "public_email_pages": [
+    {
+      "url": "https://www.exempeltidningen.example/om-oss/ledning",
+      "organisation": "Exempeltidningen",
+      "role": "Redaktionsledning",
+      "domain": "exempeltidningen.example",
+      "skip_locals": [
+        "tipsa",
+        "redaktionen"
+      ]
+    }
+  ],
+  "section_authors": [
+    {
+      "url": "https://www.exempeltidningen.example/nyheter/politik/",
+      "organisation": "Exempeltidningen",
+      "role": "Politik",
+      "domain": "exempeltidningen.example"
+    }
+  ]
+}

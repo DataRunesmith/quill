@@ -1,0 +1,29 @@
+[
+  {
+    "name": "Exempel Forskare",
+    "email": "exempel.forskare@statsvet.exempeluniversitet.example",
+    "organisation": "Exempeluniversitetet",
+    "unit": "Statsvetenskapliga institutionen",
+    "title": "Professor",
+    "academic_field": "political-science",
+    "source_url": "https://www.exempeluniversitet.example/personal/exempel-forskare"
+  },
+  {
+    "name": "Annan Forskare",
+    "email": "annan.forskare@exempeluniversitet.example",
+    "organisation": "Exempeluniversitetet",
+    "unit": "Förvaltningshögskolan",
+    "title": "Universitetslektor",
+    "academic_field": "public-administration",
+    "source_url": "https://www.exempeluniversitet.example/forvaltning/personal"
+  },
+  {
+    "name": "Tredje Forskare",
+    "email": "tredje.forskare@jur.exempeluniversitet.example",
+    "organisation": "Exempeluniversitetet",
+    "unit": "Juridiska institutionen",
+    "title": "Docent",
+    "academic_field": "public-law",
+    "source_url": "https://www.exempeluniversitet.example/juridik/personal"
+  }
+]

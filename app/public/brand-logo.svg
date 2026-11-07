@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" role="img" aria-labelledby="title">
+  <title id="title">Quill</title>
+  <rect width="520" height="120" fill="none"/>
+  <g transform="translate(8,14)">
+    <rect x="0" y="26" width="86" height="56" rx="9" fill="#FECC02"/>
+    <path d="M8 35 L43 61 L78 35 M8 73 L43 52 L78 73" fill="none" stroke="#04122a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M24 25 L64 10 L64 40 Z" fill="#FECC02" stroke="#04122a" stroke-width="5" stroke-linejoin="round"/>
+    <rect x="15" y="22" width="15" height="18" rx="3" fill="#FECC02" stroke="#04122a" stroke-width="5"/>
+    <path d="M70 16 L87 8 M73 25 L94 25 M70 34 L87 42" stroke="#FECC02" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <text x="118" y="72" font-family="Source Sans 3,Arial,sans-serif" font-size="48" font-weight="800" fill="#FECC02">Quill</text>
+</svg>

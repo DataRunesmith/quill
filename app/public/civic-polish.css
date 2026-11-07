@@ -1,0 +1,320 @@
+:root {
+  /* Tre Kronor-inspirerad marin bas med Svenska Ishockeyförbundets nuvarande webbgula accent. */
+  --bg: #08122f;
+  --bg-soft: #15244d;
+  --surface: #1b315f;
+  --surface-2: #234775;
+  --surface-3: #2d5d8d;
+  --text: #f7fbff;
+  --muted: #cad8e9;
+  --faint: #9fb5cf;
+  --line: #416b96;
+  --line-bright: #73a6ce;
+  --accent: #ffd70d;
+  --accent-strong: #ffe36a;
+  --accent-blue: #2d5d8d;
+  --accent-blue-strong: #73a6ce;
+  --warning: #ffd70d;
+  --accent-glow: rgba(255, 215, 13, 0.22);
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --font-mobile-meta: 0.8rem;
+  --font-mobile-secondary: 0.875rem;
+  --font-mobile-emphasis: 0.9rem;
+}
+
+body {
+  background:
+    radial-gradient(900px 500px at 85% -8%, rgba(45, 93, 141, 0.28), transparent 66%),
+    var(--bg-soft);
+}
+
+a:not(.button) {
+  color: var(--accent);
+}
+
+a:not(.button):hover {
+  color: var(--accent-strong);
+}
+
+/* Safari/iOS kan annars lägga en ljusgul AutoFill-yta ovanpå det mörka temat. */
+.input:-webkit-autofill,
+.input:-webkit-autofill:hover {
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-soft) inset;
+  box-shadow: 0 0 0 1000px var(--bg-soft) inset;
+  border-color: var(--line-bright);
+  transition: background-color 999999s ease-out 0s;
+}
+
+.input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  -webkit-box-shadow:
+    0 0 0 1000px var(--bg-soft) inset,
+    0 0 0 2px rgba(255, 215, 13, 0.14);
+  box-shadow:
+    0 0 0 1000px var(--bg-soft) inset,
+    0 0 0 2px rgba(255, 215, 13, 0.14);
+  border-color: var(--accent);
+  transition: background-color 999999s ease-out 0s;
+}
+
+.input:autofill {
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--bg-soft) inset;
+  border-color: var(--line-bright);
+}
+
+.input:autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  box-shadow:
+    0 0 0 1000px var(--bg-soft) inset,
+    0 0 0 2px rgba(255, 215, 13, 0.14);
+  border-color: var(--accent);
+}
+
+/*
+ * Marinblå ytor bär den visuella identiteten. Gult används som tydlig accent
+ * och primär åtgärdsfärg; vanlig brödtext förblir ljus för läsbarhet.
+ */
+.button--primary:not(:disabled) {
+  color: var(--bg-soft);
+  box-shadow:
+    0 0 0 1px rgba(255, 215, 13, 0.08),
+    0 0 22px var(--accent-glow);
+}
+
+.button--primary:not(:disabled):hover {
+  color: var(--bg-soft);
+  box-shadow:
+    0 0 0 1px rgba(255, 227, 106, 0.16),
+    0 0 28px rgba(255, 215, 13, 0.28);
+}
+
+.button--secondary:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--line-bright);
+}
+
+.button--secondary:not(:disabled):hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+/* Inställningsflikar är valda lägen, inte CTA-knappar. På iOS kan :hover
+ * ligga kvar efter tryck; behåll därför samma accentgula yta även då. */
+.settings-nav .button--primary:not(:disabled),
+.settings-nav .button--primary:not(:disabled):hover {
+  color: var(--bg-soft);
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.button--primary:disabled,
+.button--primary:disabled:hover {
+  opacity: 1;
+  color: var(--faint);
+  border-color: var(--line);
+  background: var(--bg);
+  box-shadow: none;
+}
+
+.compose-use-file:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.compose-use-file:not(:disabled):hover {
+  color: var(--bg-soft);
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.compose-use-file:disabled {
+  opacity: 1;
+  color: var(--faint);
+  border-color: var(--line);
+  background: var(--bg);
+}
+
+.details[open] > summary,
+.private-import-details > summary {
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(255, 215, 13, 0.14);
+}
+
+.card__eyebrow,
+.section-eyebrow {
+  color: var(--accent);
+}
+
+.private-entry-grid {
+  grid-template-columns: 1fr;
+}
+
+.private-entry-grid > .card,
+.private-entry-grid > .details {
+  width: 100%;
+}
+
+.private-import-details {
+  padding: 0 18px 18px;
+  background: var(--surface);
+}
+
+.private-import-details > summary {
+  min-height: 58px;
+  font-size: 1.05rem;
+}
+
+.private-import-body {
+  padding-top: 4px;
+}
+
+.private-import-hint {
+  margin: 0;
+  max-width: 68ch;
+}
+
+.private-import-details textarea.input {
+  min-height: 140px;
+}
+
+@media (max-width: 520px) {
+  /* Mobilens sekundärtext ska ha en konsekvent läsbar miniminivå. */
+  .service-band__inner span:last-child,
+  .hero-proof__item small {
+    font-size: var(--font-mobile-secondary);
+    line-height: 1.3;
+  }
+
+  .hero-proof__item strong {
+    font-size: var(--font-mobile-emphasis);
+    line-height: 1.2;
+  }
+
+  .card__eyebrow,
+  .level-card__copy small,
+  .table th {
+    font-size: var(--font-mobile-meta);
+    line-height: 1.3;
+  }
+
+  #private-recipients .card {
+    padding: 22px 18px;
+  }
+
+  .private-entry-grid .row {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .private-entry-grid .button {
+    width: 100%;
+  }
+}
+
+/* Advanced recipient filters are grouped by audience so large registries stay scannable. */
+.advanced-filter-section[hidden] {
+  display: none;
+}
+
+.advanced-filter-section__body {
+  padding-top: 4px;
+}
+
+.advanced-filter-hint {
+  margin: 0 0 12px;
+}
+
+.advanced-filter-subheading {
+  margin: 4px 0 2px;
+  font-size: 1rem;
+}
+
+#area-list.filter-area-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.filter-area-group {
+  padding: 0 14px 12px;
+  border-color: rgba(20, 83, 132, 0.68);
+  background: rgba(3, 23, 46, 0.72);
+  box-shadow: none;
+}
+
+.filter-area-group[open] {
+  border-color: rgba(29, 109, 166, 0.82);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 32%), #041c36;
+}
+
+.filter-area-group__summary {
+  min-height: 52px;
+}
+
+.filter-area-group__title {
+  display: block;
+  color: #f3f7fc;
+  font-weight: 750;
+}
+
+.filter-area-group__meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 500;
+}
+
+.filter-area-group[open] .filter-area-group__title {
+  color: var(--accent);
+}
+
+.filter-area-group__body {
+  display: grid;
+  gap: 2px;
+  padding-top: 4px;
+}
+
+.filter-area-group__body .check {
+  min-height: 42px;
+  padding: 2px 0;
+}
+
+.filter-area-limit,
+.filter-area-empty {
+  margin: 8px 0 2px;
+}
+
+#advanced-area-section > summary,
+#local-filter > summary,
+#media-filter > summary,
+#academic-filter > summary,
+#political-filter > summary,
+#person-filter > summary {
+  font-weight: 750;
+}
+
+@media (max-width: 560px) {
+  .filter-area-group {
+    padding-inline: 12px;
+  }
+
+  .filter-area-group__summary {
+    min-height: 50px;
+  }
+
+  .filter-area-group__meta {
+    font-size: 0.8rem;
+  }
+}

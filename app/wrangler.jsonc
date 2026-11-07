@@ -1,0 +1,102 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quill",
+  "main": "src/access-index.ts",
+  "compatibility_date": "2026-03-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "__PUBLIC_HOST__",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/",
+      "/api/*",
+      "/admin",
+      "/admin/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "__D1_DATABASE_NAME__",
+      "database_id": "__D1_DATABASE_ID__",
+      "migrations_dir": "../infra/migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      "id": "__KV_SESSIONS_ID__"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "quill-attachments"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "SEND_QUEUE",
+        "queue": "quill-send-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "quill-send-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RATE_LIMITER",
+        "class_name": "CredentialRateLimiter"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CredentialRateLimiter"
+      ]
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "SYSTEM_FROM_ADDRESS": "__SYSTEM_FROM_ADDRESS__",
+    "TURNSTILE_HOSTNAMES": "__TURNSTILE_HOSTNAMES__",
+    "SYSTEM_SMTP_HOST": "__SYSTEM_SMTP_HOST__",
+    "SYSTEM_SMTP_PORT": "__SYSTEM_SMTP_PORT__",
+    "SYSTEM_SMTP_USER": "__SYSTEM_SMTP_USER__",
+    "FEEDBACK_NOTIFY_EMAIL": "__FEEDBACK_NOTIFY_EMAIL__",
+    "OAUTH_GOOGLE_CLIENT_ID": "__OAUTH_GOOGLE_CLIENT_ID__",
+    "OAUTH_MICROSOFT_CLIENT_ID": "__OAUTH_MICROSOFT_CLIENT_ID__"
+  },
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ]
+}

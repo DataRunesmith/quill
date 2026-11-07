@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["scraper", "verify"]
+
+[tool.coverage.xml]
+output = "coverage.xml"

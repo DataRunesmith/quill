@@ -1,0 +1,61 @@
+[
+  {
+    "namn": "Exempelregionen",
+    "typ": "troman",
+    "url": "https://exempelregionen.tromanpublik.example.org/organisation/00000000-0000-0000-0000-000000000000"
+  },
+  {
+    "namn": "Exempelregion B",
+    "typ": "netpublicator",
+    "netpub_registry": "00000000000000000000000000000000",
+    "netpub_board": "00000000-0000-0000-0000-000000000000"
+  },
+  {
+    "namn": "Kommun A",
+    "typ": "mailto",
+    "url": "https://www.kommun-a.example.org/politik/kommunfullmaktige"
+  },
+  {
+    "namn": "Kommun B",
+    "typ": "fmr",
+    "url": "https://www.kommun-b.example.org/fmr/ledamoter"
+  },
+  {
+    "namn": "Kommun C",
+    "typ": "profilsidor",
+    "url": "https://kommun-c.example.org/politik/kommunfullmaktige.html",
+    "link_pattern": "/politiker/",
+    "domain": "kommun-c.example.org"
+  },
+  {
+    "namn": "Kommun D",
+    "typ": "namnmonster",
+    "url": "https://www.kommun-d.example.org/politik/fortroendevalda/",
+    "domain": "kommun-d.example.org",
+    "section_start": "Förtroendevalda",
+    "section_end": "Kontakt",
+    "expand_text": "Kommunfullmäktige"
+  },
+  {
+    "namn": "Kommun E",
+    "typ": "w3d3",
+    "url": "https://www.kommun-e.example.org/w3d3/ledamoter"
+  },
+  {
+    "namn": "Kommun F",
+    "typ": "pdf",
+    "url": "https://www.kommun-f.example.org/download/ledamoter.pdf",
+    "domain": "kommun-f.example.org"
+  },
+  {
+    "namn": "Kommun G",
+    "typ": "namnlista",
+    "url": "https://www.kommun-g.example.org/politik/ledamoter",
+    "domain": "kommun-g.example.org",
+    "section_start": "Kommunfullmäktiges ledamöter",
+    "section_end": "Valberedning",
+    "skip_lines": [
+      "Exempelpartiet"
+    ]
+  }
+]

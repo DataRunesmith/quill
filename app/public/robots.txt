@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://__PUBLIC_HOST__/sitemap.xml

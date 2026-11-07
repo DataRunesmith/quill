@@ -1,0 +1,27 @@
+{
+  "name": "quill-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:coverage": "c8 node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "validate": "npm test && node --test ../scripts/verify-production.test.mjs && for f in public/*.js; do node --check \"$f\" || exit 1; done && wrangler d1 migrations apply DB --local && wrangler types && tsc --noEmit && wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261103.1",
+    "@types/node": "^26.6.6",
+    "c8": "^12.0.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.157.0"
+  },
+  "dependencies": {
+    "mammoth": "^1.13.0",
+    "unpdf": "^2.1.0"
+  },
+  "overrides": {
+    "minimatch": "^11.0.4"
+  }
+}

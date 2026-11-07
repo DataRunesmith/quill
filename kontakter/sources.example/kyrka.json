@@ -1,0 +1,9 @@
+{
+  "base_url": "https://www.exempelkyrkan.example/",
+  "pages": [
+    {
+      "path": "styrelsen/ledamoter",
+      "area": "Exempelkyrkan"
+    }
+  ]
+}

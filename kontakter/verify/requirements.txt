@@ -1,0 +1,7 @@
+requests==2.34.2
+dnspython
+# Transitiv via requests, som bara kräver idna>=2.5,<4 och därför inte
+# hindrar en sårbar version. Golvet här stänger PYSEC-2026-215 /
+# GHSA-65pc-fj4g-8rjx (CVSS 6.9). Kan tas bort när requests själv kräver
+# minst 3.15.
+idna>=3.20

@@ -1,0 +1,95 @@
+/* Shared surface themes. Quill owns branding and functional accents. */
+:root[data-theme="legacy"] {
+  --bg: #04070e;
+  --bg-soft: #050912;
+  --surface: #09101e;
+  --surface-2: #0d182c;
+  --surface-3: #13233c;
+  --text: #f5f3ee;
+  --muted: #91a8c6;
+  --faint: #6f88a7;
+  --line: rgba(137, 167, 207, 0.22);
+  --line-bright: #2d9bff;
+  --shadow: 0 24px 72px rgba(0, 0, 0, 0.42);
+}
+:root[data-theme="legacy"] body {
+  background:
+    radial-gradient(circle at 14% 8%, rgba(36, 231, 232, 0.11), transparent 27rem),
+    radial-gradient(circle at 86% 18%, rgba(213, 29, 203, 0.1), transparent 30rem),
+    radial-gradient(circle at 50% 100%, rgba(45, 155, 255, 0.08), transparent 35rem),
+    linear-gradient(180deg, #050912 0%, #03060c 100%);
+  background-color: var(--bg);
+}
+:root[data-theme="legacy"] body:before {
+  opacity: 0.18;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 42px 42px;
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent 82%);
+  mask-image: linear-gradient(to bottom, #000, transparent 82%);
+}
+:root[data-theme="forest"] {
+  --bg: #080b09;
+  --bg-soft: #0c100d;
+  --surface: #111713;
+  --surface-2: #171f19;
+  --surface-3: #263129;
+  --text: #f3f5f1;
+  --muted: #a6b1aa;
+  --faint: #718077;
+  --line: #3b493e;
+  --line-bright: #7899ad;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+}
+:root[data-theme="blackout"] {
+  --bg: #000;
+  --bg-soft: #030303;
+  --surface: #070707;
+  --surface-2: #0d0d0d;
+  --surface-3: #1a1a1a;
+  --text: #f6f6f3;
+  --muted: #b5b5b5;
+  --faint: #777;
+  --line: #333;
+  --line-bright: #767d83;
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+.theme-control {
+  display: grid;
+  gap: 2px;
+  min-width: 112px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.theme-control select {
+  min-height: 38px;
+  padding: 6px 30px 6px 9px;
+  color: var(--text);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  font: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.theme-control select:focus-visible {
+  outline: 4px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (max-width: 760px) {
+  .theme-control {
+    min-width: 98px;
+  }
+  .theme-control span {
+    font-size: 0.62rem;
+  }
+  .theme-control select {
+    min-height: 40px;
+    padding-inline: 7px;
+  }
+}

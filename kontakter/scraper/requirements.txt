@@ -1,0 +1,14 @@
+playwright>=1.64.1
+pypdf>=7.0.0
+requests>=2.34.2
+# Transitiv via requests, som bara kräver idna>=2.5,<4 och därför inte
+# hindrar en sårbar version. Golvet här stänger PYSEC-2026-215 /
+# GHSA-65pc-fj4g-8rjx (CVSS 6.9). Kan tas bort när requests själv kräver
+# minst 3.15.
+idna>=3.20
+# Basimagen levererar även Python-byggverktyg. Dessa explicita golv uppgraderar
+# de sårbara versionerna under imagebygget:
+# - setuptools <83.0.0: CVE-2026-59890; >=83 täcker även CVE-2025-47273
+# - msgpack <1.2.1: GHSA-6v7p-g79w-8964
+setuptools>=84.2.1
+msgpack>=1.2.4
