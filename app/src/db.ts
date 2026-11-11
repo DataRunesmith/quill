@@ -31,7 +31,7 @@ export interface Env {
 }
 
 export async function getAccountByEmail(db: D1Database, email: string) {
-  return db.prepare("SELECT * FROM accounts WHERE email = ?").bind(email).first();
+  return db.prepare("SELECT * FROM accounts WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))").bind(email).first();
 }
 export async function getAccountById(db: D1Database, id: string) {
   return db.prepare("SELECT * FROM accounts WHERE id = ?").bind(id).first();
