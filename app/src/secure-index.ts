@@ -85,6 +85,7 @@ function needsFreshSession(method: string, pathname: string): boolean {
       "/api/totp/confirm",
       "/api/totp/disable",
       "/api/set-password",
+      "/api/delete-account",
       "/api/api-keys",
       "/api/mail-credentials",
     ].includes(pathname) ||
@@ -114,8 +115,9 @@ function isCrossSiteMutation(req: Request, url: URL, bearer: boolean): boolean {
     return false;
   const fetchSite = req.headers.get("Sec-Fetch-Site");
   if (fetchSite === "cross-site") return true;
-  const origin = req.headers.get("Origin");
-  return origin !== null && origin !== url.origin;
+  // Cookie-authenticated mutations must carry the exact same-origin Origin.
+  // Missing Origin is not proof of same-origin and must fail closed.
+  return req.headers.get("Origin") !== url.origin;
 }
 async function takeRateLimit(
   env: Env,
@@ -219,6 +221,26 @@ async function baseAppEnvForRequest(req: Request, primaryEnv: Env, bearer: boole
   return withD1Session(primaryEnv, bookmark ?? "first-unconstrained");
 }
 
+async function requestBodyExceedsLimit(req: Request, maxBytes: number): Promise<boolean> {
+  const body = req.clone().body;
+  if (!body) return false;
+  const reader = body.getReader();
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return false;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return true;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function secureFetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
   const primaryEnv = withD1Session(env, "first-primary");
@@ -265,8 +287,13 @@ async function secureFetch(req: Request, env: Env, ctx: ExecutionContext): Promi
       );
   }
   if (req.method === "POST" && url.pathname === "/api/send") {
-    const contentLength = Number(req.headers.get("Content-Length") ?? 0);
-    if (Number.isFinite(contentLength) && contentLength > MAX_SEND_REQUEST_BYTES) {
+    const contentLengthHeader = req.headers.get("Content-Length");
+    const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
+    if (
+      (contentLength !== null &&
+        (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_SEND_REQUEST_BYTES)) ||
+      (contentLength === null && (await requestBodyExceedsLimit(req, MAX_SEND_REQUEST_BYTES)))
+    ) {
       return withSecurityHeaders(
         json({ error: "Utskicket innehåller för mycket data" }, 413),
         url.pathname,
