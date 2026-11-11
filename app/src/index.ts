@@ -99,6 +99,28 @@ function getCookie(req: Request, name: string): string | null {
 function setSessionCookie(token: string): string {
   return `session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}`;
 }
+async function cleanupUnqueuedLetter(env: Env, letterId: string): Promise<void> {
+  const job = await env.DB.prepare("SELECT 1 FROM send_jobs WHERE letter_id = ? LIMIT 1")
+    .bind(letterId)
+    .first();
+  if (job) return;
+
+  const { results: attachments } = await env.DB.prepare(
+    "SELECT r2_key FROM letter_attachments WHERE letter_id = ?",
+  )
+    .bind(letterId)
+    .all<{ r2_key: string }>();
+  for (let offset = 0; offset < attachments.length; offset += 1000) {
+    await env.ATTACHMENTS.delete(
+      attachments.slice(offset, offset + 1000).map((attachment) => attachment.r2_key),
+    );
+  }
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM letter_attachments WHERE letter_id = ?").bind(letterId),
+    env.DB.prepare("DELETE FROM letters WHERE id = ?").bind(letterId),
+  ]);
+}
+
 function requestedRetentionMs(req: Request): number {
   const raw =
     req.headers.get("X-Letter-Retention-Ms") ?? getCookie(req, "letter_retention_ms") ?? "300000";
@@ -504,13 +526,20 @@ const AUTHED_ROUTES: RouteDef[] = [
         .bind(letterId, c.accountId, await encryptLetterData(c.env, htmlBody), Date.now())
         .run();
       if (input.attachments?.length) {
-        const { extractedHtml } = await processAttachments(c.env, letterId, input.attachments);
-        htmlBody += extractedHtml;
-        await c.env.DB.prepare("UPDATE letters SET html_body = ? WHERE id = ?")
-          .bind(await encryptLetterData(c.env, htmlBody), letterId)
-          .run();
+        try {
+          const { extractedHtml } = await processAttachments(c.env, letterId, input.attachments);
+          htmlBody += extractedHtml;
+          await c.env.DB.prepare("UPDATE letters SET html_body = ? WHERE id = ?")
+            .bind(await encryptLetterData(c.env, htmlBody), letterId)
+            .run();
+        } catch (error) {
+          await cleanupUnqueuedLetter(c.env, letterId);
+          throw error;
+        }
       }
-      const result = await createAndEnqueueSendJob(c.env, c.accountId, {
+      let result: Awaited<ReturnType<typeof createAndEnqueueSendJob>>;
+      try {
+        result = await createAndEnqueueSendJob(c.env, c.accountId, {
         letterId,
         introText,
         subject: input.subject,
@@ -523,7 +552,11 @@ const AUTHED_ROUTES: RouteDef[] = [
         dailyLimit: input.dailyLimit,
         switchAfterDays: input.switchAfterDays,
         nextDailyLimit: input.nextDailyLimit,
-      });
+        });
+      } catch (error) {
+        await cleanupUnqueuedLetter(c.env, letterId);
+        throw error;
+      }
       const retentionMs = requestedRetentionMs(c.req);
       await c.env.DB.prepare(
         "UPDATE send_jobs SET content_retention_ms=?, content_delete_at=CASE WHEN finished_at IS NOT NULL AND status IN ('done','aborted','cancelled') THEN finished_at+? ELSE content_delete_at END WHERE id=? AND account_id=?",
