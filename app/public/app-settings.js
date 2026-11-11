@@ -210,6 +210,25 @@ async function renderSecuritySettings() {
       host.append(d);
     }
     if (!ids.length) host.innerHTML = '<div class="empty">Inga externa inloggningar länkade.</div>';
+    const linkActions = document.createElement("div");
+    linkActions.className = "row";
+    for (const provider of ["google", "microsoft"]) {
+      if (ids.some((identity) => identity.provider === provider)) continue;
+      const button = document.createElement("button");
+      button.className = "button button--secondary";
+      button.textContent = `Koppla ${providerName(provider)}`;
+      button.onclick = async () => {
+        try {
+          const result = await api(`/api/oauth-link/${provider}/start`, { method: "POST" });
+          if (typeof result.authorizeUrl !== "string") throw new Error("Saknar inloggningsadress");
+          location.href = result.authorizeUrl;
+        } catch (err) {
+          notice(err.message, "error");
+        }
+      };
+      linkActions.append(button);
+    }
+    if (linkActions.childElementCount) host.append(linkActions);
   } catch (err) {
     $("#oauth-list").innerHTML = `<div class="notice notice--error">${esc(err.message)}</div>`;
   }
