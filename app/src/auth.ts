@@ -8,6 +8,7 @@ import {
 import { sendSmtpMail } from "../../shared/smtp";
 import { sendResendMail } from "../../shared/resend";
 import { htmlToText } from "../../shared/html";
+import { validateMailboxAddress } from "../../shared/input-safety";
 import { generateTotpSecret, totpAuthUri, verifyTotpCode } from "../../shared/totp";
 import {
   createAccount,
@@ -27,6 +28,13 @@ const SESSION_BINDING_PREFIX = "sessionbind:";
 // Resend kräver att avsändaren ligger på en verifierad domän.
 // Return-Path och dess DNS-poster hanteras separat i Resend.
 const SYSTEM_RESEND_FROM = "Quill <__SYSTEM_FROM_ADDRESS__>";
+
+function normalizeAccountEmail(value: string): string {
+  if (typeof value !== "string") throw new Error("Ogiltig e-postadress");
+  const email = validateMailboxAddress(value, "e-postadress").toLocaleLowerCase("sv-SE");
+  if (email.length > 254) throw new Error("E-postadressen är för lång");
+  return email;
+}
 
 // Brute-force-spärrar (försök inom glidande fönster). Lösenords-/TOTP-koll
 // och e-postverifiering har annars inga försöksgränser — utan detta är en
@@ -132,6 +140,7 @@ export async function signup(
   email: string,
   password: string,
 ): Promise<{ accountId: string; verified?: true }> {
+  email = normalizeAccountEmail(email);
   const existing = await getAccountByEmail(env.DB, email);
   if (existing) throw new Error("E-postadressen är redan registrerad");
   if (password.length < 10) throw new Error("Lösenordet måste vara minst 10 tecken");
@@ -184,6 +193,7 @@ export async function login(
   // konton — annars skulle ett uteblivet lockout avslöja vilka adresser som
   // saknas. Misslyckade inloggningar (fel konto/lösenord/TOTP) räknas upp,
   // ett lyckat login nollställer.
+  email = normalizeAccountEmail(email);
   await enforceAttemptLimit(env, "login", email, {
     max: LOGIN_MAX_ATTEMPTS,
     windowSeconds: LOGIN_WINDOW_SECONDS,
@@ -271,6 +281,7 @@ export async function reauthenticateAccount(
 }
 
 export async function requestPasswordReset(env: Env, email: string): Promise<void> {
+  email = normalizeAccountEmail(email);
   const account = await getAccountByEmail(env.DB, email);
   if (!account) return; // avslöja inte om e-posten finns eller inte
 
