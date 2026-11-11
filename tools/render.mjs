@@ -115,6 +115,7 @@ if (missing.length) {
 // Only a dedicated generated output directory (or a path outside the repo)
 // may be replaced. The path and its parent have been canonicalized above.
 rmSync(out, { recursive: true, force: true });
+mkdirSync(out, { recursive: true });
 const keep = (path) => {
   const outRelative = relative(out, path);
   const isOutput = outRelative === "" ||
