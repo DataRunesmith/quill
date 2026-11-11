@@ -721,10 +721,29 @@ async def scrape_pdf_lista(context, namn, url, domain):
     people = set()
     try:
         log.info(f"{namn}: hämtar {url}")
-        response = await context.request.get(url, timeout=60000)
+        if not is_safe_network_url(url) or urlsplit(url).scheme != "https":
+            raise ValueError("PDF-källan måste vara en säker HTTPS-adress")
+        response = await context.request.get(url, timeout=60000, max_redirects=0)
+        if not response.ok:
+            raise ValueError(f"PDF-källan svarade med HTTP {response.status}")
+        content_length = response.headers.get("content-length")
+        if content_length and int(content_length) > 20 * 1024 * 1024:
+            raise ValueError("PDF-filen är större än 20 MiB")
         data = await response.body()
+        if len(data) > 20 * 1024 * 1024:
+            raise ValueError("PDF-filen är större än 20 MiB")
         reader = PdfReader(BytesIO(data))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        if len(reader.pages) > 500:
+            raise ValueError("PDF-filen innehåller fler än 500 sidor")
+        text_parts = []
+        remaining_chars = 5_000_000
+        for pdf_page in reader.pages:
+            if remaining_chars <= 0:
+                break
+            page_text = (pdf_page.extract_text() or "")[:remaining_chars]
+            text_parts.append(page_text)
+            remaining_chars -= len(page_text)
+        text = "\n".join(text_parts)
         for line in text.splitlines():
             match = EMAIL_RE.search(line)
             if not match:
