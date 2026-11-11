@@ -892,6 +892,11 @@ async def main():
         for region in sources.load("regioner"):
             namn = region["namn"]
             try:
+                source_url = region.get("url")
+                if source_url and (
+                    not is_safe_network_url(source_url) or urlsplit(source_url).scheme != "https"
+                ):
+                    raise ValueError(f"{namn}: källadressen måste vara en säker HTTPS-adress")
                 if region["typ"] == "netpublicator":
                     people = await scrape_netpublicator(
                         context, namn,
