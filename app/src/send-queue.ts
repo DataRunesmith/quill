@@ -148,6 +148,12 @@ async function processJobMessages(
       queueMsg.retry({ delaySeconds: 30 });
       continue;
     }
+    // Recheck after the serialized per-credential slot is acquired so a
+    // concurrent job cannot rely on a stale pre-wait quota snapshot.
+    if (!(await maySendQueuedRecipient(env, sendJobId, m.recipientEmail, m.queuedAt))) {
+      queueMsg.ack();
+      continue;
+    }
     const current = await env.DB.prepare(
       `SELECT r.status,r.queued_at,r.subject,l.html_body FROM send_job_recipients r JOIN send_jobs sj ON sj.id=r.send_job_id JOIN letters l ON l.id=sj.letter_id WHERE r.send_job_id=? AND r.recipient_email=?`,
     )
