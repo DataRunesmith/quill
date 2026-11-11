@@ -58,6 +58,7 @@ test("OAuth-only sessions use a linked identity instead of silently extending fr
 
 test("account deletion requires a fresh web session and cookie mutations fail closed without same-origin Origin", () => {
   assert.ok(secureIndexSource.includes('"/api/delete-account"'));
+  assertSourceMatch(authSource, /if \(account\.password_set_by_user \|\| account\.totp_enabled\) \{\s*await reauthenticateAccount\(env, accountId, password, totpCode\)/);
   assertSourceMatch(secureIndexSource, /return req\.headers\.get\("Origin"\) !== url\.origin/);
   assertSourceMatch(secureIndexSource, /requestBodyExceedsLimit\(req, MAX_SEND_REQUEST_BYTES\)/);
 });
