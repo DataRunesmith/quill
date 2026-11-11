@@ -81,10 +81,23 @@ export async function processAttachments(
         cleanupComplete = false;
       }
     }
-    if (cleanupComplete && storedKeys.length) {
-      await env.DB.prepare("DELETE FROM letter_attachments WHERE letter_id = ?")
-        .bind(letterId)
-        .run();
+    // Delete only rows created by this batch. A letter may already have
+    // attachments from an earlier successful upload; deleting by letter_id
+    // here would orphan those existing R2 objects.
+    if (storedKeys.length) {
+      for (let offset = 0; offset < storedKeys.length; offset += 100) {
+        const batchKeys = storedKeys.slice(offset, offset + 100);
+        const placeholders = batchKeys.map(() => "?").join(", ");
+        try {
+          await env.DB.prepare(
+            `DELETE FROM letter_attachments WHERE letter_id = ? AND r2_key IN (${placeholders})`,
+          )
+            .bind(letterId, ...batchKeys)
+            .run();
+        } catch {
+          cleanupComplete = false;
+        }
+      }
     }
     if (!cleanupComplete)
       throw new Error("Bilagorna kunde inte behandlas och R2-städningen misslyckades. Försök igen senare.");
