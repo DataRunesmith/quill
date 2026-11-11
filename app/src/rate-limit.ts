@@ -1,19 +1,13 @@
+import { sha256Hex } from "../../shared/crypto";
 import type { Env } from "./db";
 
-// Enkel försöksbegränsning för autentiseringsflöden, via SESSIONS-KV.
-// Best-effort: KV är eventually consistent och läs+skriv är inte atomiskt,
-// så enstaka samtidiga försök kan slinka förbi — samma medvetna kompromiss
-// som dygnstaket i draft-letter. Räcker som broms mot brute-force i den här
-// skalan; en hård spärr skulle kräva en Durable Object.
-//
-// Nyckeln innehåller aldrig hemligheter (bara e-post/konto-id + bucket-namn)
-// och svaret är alltid samma generiska fel oavsett om kontot finns — så
-// spärren i sig avslöjar inte om en e-postadress är registrerad.
+// Authentication attempts are serialized by one Durable Object per
+// (bucket, identifier). KV read/modify/write is not atomic and allowed
+// parallel guesses to bypass the previous counter.
 
-const KEY_PREFIX = "ratelimit";
-
-function bucketKey(bucket: string, identifier: string): string {
-  return `${KEY_PREFIX}:${bucket}:${identifier.toLowerCase()}`;
+async function attemptObject(env: Env, bucket: string, identifier: string) {
+  const key = await sha256Hex(`${bucket}:${identifier.trim().toLocaleLowerCase("sv-SE")}`);
+  return env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(`auth-attempt:${key}`));
 }
 
 export async function enforceAttemptLimit(
@@ -22,25 +16,20 @@ export async function enforceAttemptLimit(
   identifier: string,
   opts: { max: number; windowSeconds: number },
 ): Promise<void> {
-  const count = parseInt((await env.SESSIONS.get(bucketKey(bucket, identifier))) ?? "0", 10);
-  if (count >= opts.max) {
+  const response = await (await attemptObject(env, bucket, identifier)).fetch(
+    "https://rate-limiter/attempt",
+    { method: "POST", body: JSON.stringify(opts) },
+  );
+  if (!response.ok) throw new Error("Inloggningsskyddet är tillfälligt otillgängligt");
+  const result = await response.json<{ allowed?: boolean }>();
+  if (result.allowed !== true)
     throw new Error("För många försök — vänta en stund och försök igen.");
-  }
-}
-
-// Glidande fönster: varje nytt misslyckande förlänger TTL:en, så ihållande
-// försök håller spärren aktiv tills det varit tyst i windowSeconds.
-export async function recordFailedAttempt(
-  env: Env,
-  bucket: string,
-  identifier: string,
-  windowSeconds: number,
-): Promise<void> {
-  const key = bucketKey(bucket, identifier);
-  const count = parseInt((await env.SESSIONS.get(key)) ?? "0", 10);
-  await env.SESSIONS.put(key, String(count + 1), { expirationTtl: windowSeconds });
 }
 
 export async function clearAttempts(env: Env, bucket: string, identifier: string): Promise<void> {
-  await env.SESSIONS.delete(bucketKey(bucket, identifier));
+  const response = await (await attemptObject(env, bucket, identifier)).fetch(
+    "https://rate-limiter/clear-attempts",
+    { method: "POST" },
+  );
+  if (!response.ok) throw new Error("Inloggningsskyddet kunde inte återställas");
 }
