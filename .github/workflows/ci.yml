@@ -26,6 +26,7 @@ jobs:
         working-directory: app
       - run: npm run validate
         working-directory: app
+      - run: node --test tools/check-addresses.test.mjs
       - run: node tools/check-addresses.mjs
 
   kontakter:
@@ -40,5 +41,5 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.14"
-      - run: pip install -r requirements-dev.txt requests pypdf dnspython
+      - run: pip install -r requirements-dev.txt requests pypdf dnspython playwright
       - run: python -m pytest -q

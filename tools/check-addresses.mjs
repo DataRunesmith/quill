@@ -9,9 +9,9 @@ import { readFileSync } from "node:fs";
 
 const ADDRESS = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g;
 const RESERVED = /(?:^|\.)(?:example\.(?:com|net|org)|example|test|invalid|localhost)$/i;
-// Package scopes, versions and release tags (action@v1.2.3) look like addresses
-// but are not.
-const NOT_AN_ADDRESS = /^(?:v?\d+(?:\.\d+)*|[a-z]+\.(?:js|ts|mjs|json))$/i;
+// Package versions and filenames look like addresses but are not.
+// A v-prefixed release tag is excluded only in an owner/action reference.
+const NOT_AN_ADDRESS = /^(?:\d+(?:\.\d+)*|[a-z]+\.(?:js|ts|mjs|json))$/i;
 
 const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
   .split("\0")
@@ -32,7 +32,11 @@ for (const path of files) {
     for (const match of line.matchAll(ADDRESS)) {
       if (line[match.index - 1] === ":") continue; // user:password@host in a URL
       const domain = match[1].replace(/\.$/, "");
-      if (!RESERVED.test(domain) && !NOT_AN_ADDRESS.test(domain))
+      const actionReference = /^v\d+(?:\.\d+)*$/i.test(domain) &&
+        /(?:^|[\s"'`(])[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+\/)*$/.test(
+          line.slice(0, match.index),
+        );
+      if (!RESERVED.test(domain) && !NOT_AN_ADDRESS.test(domain) && !actionReference)
         found.push(`${path}:${index + 1}: ${match[0]}`);
     }
   });
