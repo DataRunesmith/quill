@@ -93,7 +93,12 @@ function json(data: unknown, status = 200): Response {
 }
 function getCookie(req: Request, name: string): string | null {
   const cookie = req.headers.get("Cookie") ?? "";
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\function getCookie(req: Request, name: string): string | null {
+  const cookie = req.headers.get("Cookie") ?? "";
   const match = cookie.match(new RegExp(`${name}=([^;]+)`));
+  return match ? match[1] : null;
+}");
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${escapedName}=([^;]*)`));
   return match ? match[1] : null;
 }
 function setSessionCookie(token: string): string {
