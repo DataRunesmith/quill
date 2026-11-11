@@ -55,3 +55,9 @@ test("OAuth-only sessions use a linked identity instead of silently extending fr
   assertSourceMatch(appSource, /Du behöver inte logga ut/);
   assertSourceMatch(appSource, /pending:route/);
 });
+
+test("account deletion requires a fresh web session and cookie mutations fail closed without same-origin Origin", () => {
+  assertSourceMatch(secureIndexSource, /"\\/api\\/delete-account"/);
+  assertSourceMatch(secureIndexSource, /return req\.headers\.get\("Origin"\) !== url\.origin/);
+  assertSourceMatch(secureIndexSource, /requestBodyExceedsLimit\(req, MAX_SEND_REQUEST_BYTES\)/);
+});
