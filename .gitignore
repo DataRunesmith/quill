@@ -606,3 +606,9 @@ coverage/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Your own values for tools/deploy.sh and tools/render.mjs, and a copy rendered
+# with them
+*.env
+!*.example.env
+/build/

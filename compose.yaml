@@ -1,0 +1,23 @@
+# Self-hosted copy. Set ADMIN_EMAIL in the shell or in a .env file next to this
+# file, then: docker compose up -d
+services:
+  quill:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL to the address of the first administrator}
+      SYSTEM_FROM_ADDRESS: ${SYSTEM_FROM_ADDRESS:-}
+      SYSTEM_SMTP_HOST: ${SYSTEM_SMTP_HOST:-}
+      SYSTEM_SMTP_PORT: ${SYSTEM_SMTP_PORT:-}
+      SYSTEM_SMTP_USER: ${SYSTEM_SMTP_USER:-}
+      SYSTEM_SMTP_PASSWORD: ${SYSTEM_SMTP_PASSWORD:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+    volumes:
+      - data:/data
+volumes:
+  data:

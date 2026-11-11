@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  # A copy of the repo without a Cloudflare token has nothing to deploy to.
+  configured:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "ready=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "The secret CLOUDFLARE_API_TOKEN is not set, so nothing is deployed."
+          fi
+
+  deploy:
+    needs: configured
+    if: needs.configured.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    # Every name in cloudflare.example.env, read from the repository secrets.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PUBLIC_HOST: ${{ secrets.PUBLIC_HOST }}
+      SYSTEM_FROM_ADDRESS: ${{ secrets.SYSTEM_FROM_ADDRESS }}
+      TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+      TURNSTILE_HOSTNAMES: ${{ secrets.TURNSTILE_HOSTNAMES }}
+      D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      KV_SESSIONS_ID: ${{ secrets.KV_SESSIONS_ID }}
+      SYSTEM_SMTP_HOST: ${{ secrets.SYSTEM_SMTP_HOST }}
+      SYSTEM_SMTP_PORT: ${{ secrets.SYSTEM_SMTP_PORT }}
+      SYSTEM_SMTP_USER: ${{ secrets.SYSTEM_SMTP_USER }}
+      FEEDBACK_NOTIFY_EMAIL: ${{ secrets.FEEDBACK_NOTIFY_EMAIL }}
+      OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
+      OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.OAUTH_MICROSOFT_CLIENT_ID }}
+      THEME_KEY_PREFIX: ${{ secrets.THEME_KEY_PREFIX }}
+      THEME_COOKIE_DOMAIN: ${{ secrets.THEME_COOKIE_DOMAIN }}
+      SITE_FAMILY: ${{ secrets.SITE_FAMILY }}
+      DONATION_HTML: ${{ secrets.DONATION_HTML }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.14"
+      - run: npm ci
+        working-directory: app
+      - run: npm test
+        working-directory: app
+      - run: sh tools/deploy.sh
