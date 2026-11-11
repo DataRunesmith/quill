@@ -65,6 +65,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Run Trivy
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: "true"
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
