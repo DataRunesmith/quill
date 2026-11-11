@@ -6,17 +6,16 @@ const url = `http://127.0.0.1:${port}/cdn-cgi/handler/scheduled?cron=${encodeURI
 
 async function tick() {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!response.ok) console.error(`[scheduler] scheduled run: HTTP ${response.status}`);
   } catch {
-    // The Worker is still starting; try again next minute.
+    // The Worker is still starting or the local scheduled handler timed out.
   }
 }
 
-setTimeout(
-  function loop() {
-    tick();
-    setTimeout(loop, 60_000 - (Date.now() % 60_000));
-  },
-  60_000 - (Date.now() % 60_000),
-);
+async function loop() {
+  await tick();
+  setTimeout(loop, 60_000 - (Date.now() % 60_000));
+}
+
+setTimeout(loop, 60_000 - (Date.now() % 60_000));
