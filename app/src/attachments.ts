@@ -52,8 +52,6 @@ export async function processAttachments(
       }
 
       const r2Key = `${letterId}/${randomId()}-${meta.filename}`;
-      await env.ATTACHMENTS.put(r2Key, bytes, { httpMetadata: { contentType: meta.contentType } });
-      storedKeys.push(r2Key);
       await env.DB.prepare(
         `INSERT INTO letter_attachments (id, letter_id, filename, content_type, r2_key, size_bytes, mode, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -69,6 +67,10 @@ export async function processAttachments(
           Date.now(),
         )
         .run();
+      // Persist the key before writing R2 so a failed upload remains discoverable
+      // and can be cleaned up without leaving an unreferenced object.
+      storedKeys.push(r2Key);
+      await env.ATTACHMENTS.put(r2Key, bytes, { httpMetadata: { contentType: meta.contentType } });
     }
   } catch (error) {
     let cleanupComplete = true;
