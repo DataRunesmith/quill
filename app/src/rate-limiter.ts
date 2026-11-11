@@ -29,12 +29,15 @@ export class CredentialRateLimiter {
       if (!Number.isSafeInteger(max) || max < 1 || !Number.isSafeInteger(windowSeconds) || windowSeconds < 1)
         return Response.json({ error: "Invalid attempt limit" }, { status: 400 });
       const now = Date.now();
-      const current = await this.state.storage.get<{ count: number; lastAttemptMs: number }>("attempt");
-      const count =
-        !current || now - current.lastAttemptMs >= windowSeconds * 1000 ? 0 : current.count;
-      if (count >= max) return Response.json({ allowed: false });
-      await this.state.storage.put("attempt", { count: count + 1, lastAttemptMs: now });
-      return Response.json({ allowed: true });
+      const allowed = await this.state.storage.transaction(async (txn) => {
+        const current = await txn.get<{ count: number; lastAttemptMs: number }>("attempt");
+        const count =
+          !current || now - current.lastAttemptMs >= windowSeconds * 1000 ? 0 : current.count;
+        if (count >= max) return false;
+        await txn.put("attempt", { count: count + 1, lastAttemptMs: now });
+        return true;
+      });
+      return Response.json({ allowed });
     }
 
     if (pathname === "/clear-attempts") {
@@ -53,26 +56,27 @@ export class CredentialRateLimiter {
       return Response.json({ error: "Invalid token bucket parameters" }, { status: 400 });
     }
     const now = Date.now();
+    const result = await this.state.storage.transaction(async (txn) => {
+      const bucket =
+        (await txn.get<BucketState>("bucket")) ?? { tokens: capacity, lastRefillMs: now };
+      const refillPerMs = refillPerMinute / 60_000;
+      const elapsedMs = Math.max(0, now - bucket.lastRefillMs);
+      const refilled = Math.min(capacity, bucket.tokens + elapsedMs * refillPerMs);
 
-    let bucket = await this.state.storage.get<BucketState>("bucket");
-    if (!bucket) {
-      bucket = { tokens: capacity, lastRefillMs: now };
-    }
+      if (refilled >= 1) {
+        await txn.put<BucketState>("bucket", {
+          tokens: refilled - 1,
+          lastRefillMs: now,
+        });
+        return { granted: true as const };
+      }
 
-    const refillPerMs = refillPerMinute / 60_000;
-    const elapsedMs = Math.max(0, now - bucket.lastRefillMs);
-    const refilled = Math.min(capacity, bucket.tokens + elapsedMs * refillPerMs);
-
-    if (refilled >= 1) {
-      await this.state.storage.put<BucketState>("bucket", {
-        tokens: refilled - 1,
-        lastRefillMs: now,
-      });
-      return Response.json({ granted: true });
-    }
-
-    await this.state.storage.put<BucketState>("bucket", { tokens: refilled, lastRefillMs: now });
-    const msUntilNextToken = Math.ceil((1 - refilled) / refillPerMs);
-    return Response.json({ granted: false, retryAfterMs: msUntilNextToken });
+      await txn.put<BucketState>("bucket", { tokens: refilled, lastRefillMs: now });
+      return {
+        granted: false as const,
+        retryAfterMs: Math.ceil((1 - refilled) / refillPerMs),
+      };
+    });
+    return Response.json(result);
   }
 }
