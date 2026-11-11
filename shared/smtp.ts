@@ -225,14 +225,14 @@ async function readSmtpResponse(
       const line = buffer.slice(0, lineEnd);
       buffer = buffer.slice(lineEnd + 2);
       if (!line) throw new SmtpError("SMTP-servern skickade en ogiltig svarrad");
-      const match = line.match(/^(\\d{3})([ -])/);
+      const match = line.match(/^(\d{3})([ -])/);
       if (!match) throw new SmtpError("SMTP-servern skickade ett ogiltigt svar");
       const code = Number(match[1]);
       if (responseCode === null) responseCode = code;
       else if (responseCode !== code)
         throw new SmtpError("SMTP-servern ändrade svarskod mitt i ett flerradssvar");
       lines.push(line);
-      if (match[2] === " ") return { code, text: lines.join("\\n") };
+      if (match[2] === " ") return { code, text: lines.join("\n") };
       lineEnd = buffer.indexOf("\r\n");
     }
   }
