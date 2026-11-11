@@ -131,7 +131,7 @@ export async function handleOAuthCallback(
 
   if (provider !== "google" || !email) {
     throw new Error(
-      "Microsoft-e-postadresser kan inte användas för automatisk kontokoppling. Logga in med ditt befintliga Quill-konto och koppla Microsoft under Inställningar.",
+      "Microsofts e-postuppgift kan inte verifiera ett Quill-konto. Skapa först ett konto med e-post/lösenord eller Google, logga in och koppla sedan Microsoft under Inställningar.",
     );
   }
 
