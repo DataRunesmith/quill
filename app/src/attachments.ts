@@ -81,10 +81,10 @@ export async function processAttachments(
         cleanupComplete = false;
       }
     }
-    // Delete only rows created by this batch. A letter may already have
-    // attachments from an earlier successful upload; deleting by letter_id
-    // here would orphan those existing R2 objects.
-    if (storedKeys.length) {
+    // Keep database references if any R2 delete failed so the remaining
+    // objects stay discoverable for a later cleanup. Never delete earlier
+    // attachments belonging to this letter.
+    if (cleanupComplete && storedKeys.length) {
       for (let offset = 0; offset < storedKeys.length; offset += 100) {
         const batchKeys = storedKeys.slice(offset, offset + 100);
         const placeholders = batchKeys.map(() => "?").join(", ");
