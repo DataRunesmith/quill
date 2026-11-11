@@ -125,9 +125,20 @@ const keep = (path) => {
 };
 for (const name of readdirSync(source)) {
   const path = join(source, name);
-  if (keep(path)) cpSync(path, join(out, name), { recursive: true, filter: keep });
+  if (keep(path))
+    cpSync(path, join(out, name), {
+      recursive: true,
+      filter: (candidate) => keep(candidate) && !lstatSync(candidate).isSymbolicLink(),
+    });
 }
-if (overlayArg && existsSync(overlayArg)) cpSync(overlayArg, out, { recursive: true });
+if (overlayArg && existsSync(overlayArg)) {
+  if (lstatSync(overlayArg).isSymbolicLink())
+    throw new Error("Overlay directory cannot be a symbolic link.");
+  cpSync(overlayArg, out, {
+    recursive: true,
+    filter: (candidate) => !lstatSync(candidate).isSymbolicLink(),
+  });
+}
 
 // Dependencies stay in the repo; link them instead of copying.
 (function linkModules(dir) {
