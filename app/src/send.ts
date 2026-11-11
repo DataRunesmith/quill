@@ -264,12 +264,12 @@ async function remainingQuotaForCredential(
   };
 }
 
-async function stageRecipients(
+function stageRecipientStatements(
   env: Env,
   sendJobId: string,
   recipients: StagedRecipient[],
   subject?: string,
-): Promise<void> {
+): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < recipients.length; i += STAGE_CHUNK_SIZE) {
     const chunk = recipients.slice(i, i + STAGE_CHUNK_SIZE);
@@ -282,7 +282,7 @@ async function stageRecipients(
       ).bind(sendJobId, subject ?? null, JSON.stringify(chunk)),
     );
   }
-  if (statements.length > 0) await env.DB.batch(statements);
+  return statements;
 }
 
 export async function enqueuePendingRecipientsForJob(
@@ -487,13 +487,13 @@ export async function createAndEnqueueSendJob(
   const rate = parseRateInput(input);
   const introText = normalizeSelectedLetterIntroText(input.introText);
   const storedIntroText = introText ? await encryptLetterData(env, introText) : null;
-  await env.DB.prepare(
-    `INSERT INTO send_jobs
-       (id, account_id, letter_id, mail_credential_id, total_recipients, status,
-        daily_limit, next_daily_limit, limit_switch_at, intro_text, created_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
-  )
-    .bind(
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO send_jobs
+         (id, account_id, letter_id, mail_credential_id, total_recipients, status,
+          daily_limit, next_daily_limit, limit_switch_at, intro_text, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+    ).bind(
       sendJobId,
       accountId,
       input.letterId,
@@ -504,10 +504,9 @@ export async function createAndEnqueueSendJob(
       rate.limitSwitchAt,
       storedIntroText,
       Date.now(),
-    )
-    .run();
-
-  await stageRecipients(env, sendJobId, orderedRecipients, input.subject);
+    ),
+    ...stageRecipientStatements(env, sendJobId, orderedRecipients, input.subject),
+  ]);
   const quota = await remainingQuotaForCredential(env, accountId, input.mailCredentialId);
   await enqueueWithinLimits(env, sendJobId, quota.remaining);
   return { sendJobId, totalRecipients: recipients.length };
