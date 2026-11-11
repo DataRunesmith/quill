@@ -223,35 +223,44 @@ async function remainingQuotaForCredential(
   const credential = await getMailCredential(env.DB, mailCredentialId);
   if (!credential || credential.account_id !== accountId) throw new Error("Mailkoppling saknas");
 
-  if (credential.daily_cap != null) {
-    const sentViaCredentialToday = await countSentTodayForCredential(env.DB, mailCredentialId);
-    const queuedViaCredential = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM send_job_recipients r
-       JOIN send_jobs j ON j.id = r.send_job_id
-       WHERE j.mail_credential_id = ? AND r.status = 'queued'`,
-    )
-      .bind(mailCredentialId)
-      .first<{ n: number }>();
-    return {
-      remaining: Math.max(
-        0,
-        Number(credential.daily_cap) - sentViaCredentialToday - (queuedViaCredential?.n ?? 0),
-      ),
-      label: `dygnsgränsen för detta mailkonto (${credential.daily_cap}/dygn)`,
-    };
-  }
-
-  const sentToday = await countSentToday(env.DB, accountId);
-  const queued = await env.DB.prepare(
+  const accountSentToday = await countSentToday(env.DB, accountId);
+  const accountQueued = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM send_job_recipients r
      JOIN send_jobs j ON j.id = r.send_job_id
      WHERE j.account_id = ? AND r.status = 'queued'`,
   )
     .bind(accountId)
     .first<{ n: number }>();
+  const accountRemaining = Math.max(
+    0,
+    account.daily_send_cap - accountSentToday - (accountQueued?.n ?? 0),
+  );
+
+  if (credential.daily_cap == null) {
+    return {
+      remaining: accountRemaining,
+      label: `kontots dygnsgräns (${account.daily_send_cap}/dygn)`,
+    };
+  }
+
+  const sentViaCredentialToday = await countSentTodayForCredential(env.DB, mailCredentialId);
+  const queuedViaCredential = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM send_job_recipients r
+     JOIN send_jobs j ON j.id = r.send_job_id
+     WHERE j.mail_credential_id = ? AND r.status = 'queued'`,
+  )
+    .bind(mailCredentialId)
+    .first<{ n: number }>();
+  const credentialRemaining = Math.max(
+    0,
+    Number(credential.daily_cap) - sentViaCredentialToday - (queuedViaCredential?.n ?? 0),
+  );
   return {
-    remaining: Math.max(0, account.daily_send_cap - sentToday - (queued?.n ?? 0)),
-    label: `kontots dygnsgräns (${account.daily_send_cap}/dygn)`,
+    remaining: Math.min(accountRemaining, credentialRemaining),
+    label:
+      accountRemaining <= credentialRemaining
+        ? `kontots dygnsgräns (${account.daily_send_cap}/dygn)`
+        : `dygnsgränsen för detta mailkonto (${credential.daily_cap}/dygn)`,
   };
 }
 
