@@ -13,7 +13,9 @@ export function isEncryptedLetterData(value: string): boolean {
   return value.startsWith(PREFIX);
 }
 export async function encryptLetterData(env: PrivacyEnv, plaintext: string): Promise<string> {
-  if (isEncryptedLetterData(plaintext) || plaintext === REDACTED) return plaintext;
+  // The prefix and redaction marker are storage metadata, not trusted input.
+  // Always encrypt caller-supplied text so content beginning with either marker
+  // cannot bypass encryption or be mistaken for already-redacted content.
   return PREFIX + (await encryptSecret(plaintext, keyFor(env)));
 }
 export async function decryptLetterData(env: PrivacyEnv, stored: string): Promise<string> {
