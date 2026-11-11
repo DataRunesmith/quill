@@ -240,12 +240,10 @@ async function requestBodyExceedsLimit(req: Request, maxBytes: number): Promise<
       if (done) return false;
       total += value.byteLength;
       if (total > maxBytes) {
-        await reader.cancel();
-        try {
-          await req.body?.cancel();
-        } catch {
-          // The original stream may already be locked by the runtime.
-        }
+        await Promise.allSettled([
+          reader.cancel(),
+          req.body?.cancel() ?? Promise.resolve(),
+        ]);
         return true;
       }
     }
