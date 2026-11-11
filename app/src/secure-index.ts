@@ -224,7 +224,7 @@ async function baseAppEnvForRequest(req: Request, primaryEnv: Env, bearer: boole
 async function requestBodyExceedsLimit(req: Request, maxBytes: number): Promise<boolean> {
   const contentLengthHeader = req.headers.get("Content-Length");
   if (contentLengthHeader !== null) {
-    if (!/^\\d+$/.test(contentLengthHeader)) return true;
+    if (!/^\d+$/.test(contentLengthHeader)) return true;
     const contentLength = Number(contentLengthHeader);
     if (!Number.isSafeInteger(contentLength) || contentLength > maxBytes) return true;
     return false;
