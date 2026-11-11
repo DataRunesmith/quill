@@ -55,7 +55,10 @@ export async function deleteAccount(env: Env, accountId: string): Promise<void> 
     .all<{ r2_key: string }>();
   // Keep the attachment references until R2 confirms deletion. Swallowing an
   // R2 failure after deleting the rows would orphan private files permanently.
-  if (attachmentRows.length) await env.ATTACHMENTS.delete(attachmentRows.map((r) => r.r2_key));
+  for (let offset = 0; offset < attachmentRows.length; offset += 1000) {
+    const keys = attachmentRows.slice(offset, offset + 1000).map((row) => row.r2_key);
+    await env.ATTACHMENTS.delete(keys);
+  }
   await env.DB.batch([
     env.DB.prepare(
       "DELETE FROM letter_attachments WHERE letter_id IN (SELECT id FROM letters WHERE account_id = ?)",
