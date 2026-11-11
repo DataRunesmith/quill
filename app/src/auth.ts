@@ -419,18 +419,11 @@ export async function deleteOwnAccount(
   const account = await getAccountById(env.DB, accountId);
   if (!account) throw new Error("Konto saknas");
 
-  if (account.password_set_by_user) {
-    const ok = await verifyPassword(
-      password ?? "",
-      account.password_hash as string,
-      account.password_salt as string,
-    );
-    if (!ok) throw new Error("Fel lösenord");
-  }
-  if (account.totp_enabled) {
-    if (!totpCode) throw new Error("TOTP_REQUIRED");
-    const valid = await verifyTotpCode(account.totp_secret as string, totpCode);
-    if (!valid) throw new Error("Fel TOTP-kod");
+  // Local factors must use the same rate-limited reauthentication path as
+  // other sensitive account changes. OAuth-only accounts are protected by
+  // secure-index's fresh-session gate before this function is reached.
+  if (account.password_set_by_user || account.totp_enabled) {
+    await reauthenticateAccount(env, accountId, password, totpCode);
   }
 
   await deleteAccount(env, accountId);
