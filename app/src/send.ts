@@ -165,7 +165,8 @@ export async function maySendQueuedRecipient(
   queuedAt: number,
 ): Promise<boolean> {
   const job = await env.DB.prepare(
-    "SELECT daily_limit, next_daily_limit, limit_switch_at, status FROM send_jobs WHERE id = ?",
+    `SELECT daily_limit, next_daily_limit, limit_switch_at, status, account_id, mail_credential_id
+     FROM send_jobs WHERE id = ?`,
   )
     .bind(sendJobId)
     .first<{
@@ -173,8 +174,39 @@ export async function maySendQueuedRecipient(
       next_daily_limit: number | null;
       limit_switch_at: number | null;
       status: string;
+      account_id: string;
+      mail_credential_id: string;
     }>();
   if (!job || !["pending", "sending"].includes(job.status)) return false;
+
+  const deferRecipient = async () => {
+    await env.DB.prepare(
+      `UPDATE send_job_recipients SET status = 'pending', queued_at = NULL
+       WHERE send_job_id = ? AND recipient_email = ? AND status = 'queued' AND queued_at = ?`,
+    )
+      .bind(sendJobId, recipientEmail, queuedAt)
+      .run();
+    return false;
+  };
+
+  const account = await env.DB.prepare("SELECT daily_send_cap FROM accounts WHERE id = ?")
+    .bind(job.account_id)
+    .first<{ daily_send_cap: number }>();
+  if (!account || (await countSentToday(env.DB, job.account_id)) >= account.daily_send_cap)
+    return deferRecipient();
+
+  const credential = await env.DB.prepare(
+    "SELECT daily_cap FROM mail_credentials WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
+  )
+    .bind(job.mail_credential_id, job.account_id)
+    .first<{ daily_cap: number | null }>();
+  if (!credential) return deferRecipient();
+  if (
+    credential.daily_cap != null &&
+    (await countSentTodayForCredential(env.DB, job.mail_credential_id)) >= credential.daily_cap
+  ) {
+    return deferRecipient();
+  }
 
   const dailyLimit = effectiveJobDailyLimit(job);
   if (dailyLimit == null) return true;
@@ -201,13 +233,7 @@ export async function maySendQueuedRecipient(
       : null;
   if (allowed) return true;
 
-  await env.DB.prepare(
-    `UPDATE send_job_recipients SET status = 'pending', queued_at = NULL
-     WHERE send_job_id = ? AND recipient_email = ? AND status = 'queued' AND queued_at = ?`,
-  )
-    .bind(sendJobId, recipientEmail, queuedAt)
-    .run();
-  return false;
+  return deferRecipient();
 }
 
 async function remainingQuotaForCredential(
