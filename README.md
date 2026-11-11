@@ -23,7 +23,7 @@ node tools/render.mjs mina-värden.env build
 
 Hemligheter, till exempel `MAIL_CRED_KEY`, läggs inte i värdefilen utan sätts med `wrangler secret put` eller som miljövariabler i containern. Databasen skapas av filerna i `infra/migrations`.
 
-`docker/entrypoint.sh` renderar och startar appen från miljövariabler i en container, med data i `/data`. Första administratören skapas från `ADMIN_EMAIL`.
+`docker/entrypoint.sh` renderar och startar appen från miljövariabler i en container, med data i `/data`. Första administratören skapas en gång från `ADMIN_EMAIL` och `ADMIN_PASSWORD` (minst 12 tecken). Sätt båda som container-hemligheter. Bootstrap skapar bara ett nytt konto om adressen inte redan finns; ett befintligt konto upphöjs aldrig automatiskt till administratör.
 
 Kontaktverktygen:
 
