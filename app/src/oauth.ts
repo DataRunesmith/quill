@@ -57,7 +57,7 @@ async function exchangeCodeForUserInfo(
   env: Env,
   code: string,
 ): Promise<{ providerUserId: string; email: string | null }> {
-  const cfg = PROVIDERS[provider];
+  const cfg = Object.hasOwn(PROVIDERS, provider) ? PROVIDERS[provider] : undefined;
   if (!cfg) throw new Error("Okänd eller avvecklad inloggningsleverantör");
   const clientId = env[cfg.clientIdEnvKey] as string | undefined;
   const clientSecret = env[cfg.clientSecretEnvKey] as string | undefined;
