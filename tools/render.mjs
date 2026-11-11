@@ -12,6 +12,7 @@
 // optional overlay directory are copied on top (e.g. your own images). Routes
 // whose pattern ends up empty are dropped from wrangler.jsonc. Deploy with
 //   npx wrangler deploy --cwd <out-dir>   (quill: --cwd <out-dir>/app)
+import { execFileSync } from "node:child_process";
 import {
   closeSync,
   cpSync,
@@ -56,9 +57,23 @@ const isWithin = (parent, candidate) => {
 if (isWithin(out, source))
   throw new Error("Output path cannot be the source directory or one of its parent directories.");
 if (isWithin(source, out)) {
-  const outputRoot = relative(source, out).split(sep)[0];
+  const outputRelative = relative(source, out);
+  const outputRoot = outputRelative.split(sep)[0];
   if (!["dist", ".wrangler", "site-docs", "build"].includes(outputRoot))
     throw new Error("An output directory inside the repository must be a dedicated generated directory (dist, .wrangler, site-docs or build).");
+  try {
+    execFileSync("git", ["check-ignore", "--quiet", "--no-index", "--", outputRelative], {
+      cwd: source,
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error("An output directory inside the repository must be ignored by Git.");
+  }
+  const trackedFiles = execFileSync("git", ["ls-files", "--", outputRelative], {
+    cwd: source,
+    encoding: "utf8",
+  }).trim();
+  if (trackedFiles) throw new Error("Refusing to delete tracked files from the output directory.");
 }
 const SKIP = new Set(["node_modules", ".wrangler", "dist", ".dev.vars", ".git", ".github"]);
 const TEXT = new Set([
