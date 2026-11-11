@@ -9,7 +9,7 @@ const settingsSource = readFileSync(new URL("../public/app-settings.js", import.
 test("Microsoft email claims cannot auto-link or verify Quill accounts", () => {
   assert.match(oauthSource, /provider !== "google" \|\| !email/);
   assert.match(oauthSource, /userData\.email_verified !== true/);
-  assert.match(oauthSource, /Microsoft-e-postadresser kan inte användas för automatisk kontokoppling/);
+  assert.match(oauthSource, /Microsofts e-postuppgift kan inte verifiera ett Quill-konto/);
 });
 
 test("external identities can only be linked to the currently authenticated account", () => {
