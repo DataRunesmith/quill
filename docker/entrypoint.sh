@@ -59,8 +59,8 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
-sed -n 's/^\\([A-Z][A-Z0-9_]*\\)=.*/\\1/p' "$app/cloudflare.example.env" | while read -r name; do
-  printf '%s=%s\\n' "$name" "$(printenv "$name" || true)"
+sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$app/cloudflare.example.env" | while read -r name; do
+  printf '%s=%s\n' "$name" "$(printenv "$name" || true)"
 done >"$values"
 site=/srv/site
 node /opt/app/tools/render.mjs "$values" "$site" >/dev/null
