@@ -1,0 +1,35 @@
+# The documentation site. tools/docs-site.mjs assembles site-docs/ from
+# README.md, docker/README.md and docs/, taking repo_url and the page titles
+# from this file; `zensical build` then writes the site to site/. No site_url
+# is set, so the build does not depend on the address it is served from.
+[project]
+site_name = "Quill"
+site_description = "Webbverktyg för att skriva brev till politiker, myndigheter och redaktioner från sitt eget e-postkonto."
+repo_url = "https://github.com/DataRunesmith/quill"
+docs_dir = "site-docs"
+nav = [
+  { "Start" = "index.md" },
+  { "English" = "eng/README.md" },
+]
+
+[project.theme]
+language = "sv"
+font = false
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.top",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Byt till mörkt läge"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Byt till ljust läge"
