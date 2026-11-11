@@ -10,13 +10,15 @@ Sparar resultat som VCF-filer (en per region + en samlad).
 
 import asyncio
 import csv
+import ipaddress
 import logging
 import os
 import re
 import sys
+import socket
 import unicodedata
 from io import BytesIO
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 from playwright.async_api import async_playwright, Error as PlaywrightError
 from pypdf import PdfReader
 
@@ -55,6 +57,61 @@ def is_valid_email(email: str) -> bool:
     if not EMAIL_RE.fullmatch(email):
         return False
     return not any(kw in email for kw in SKIP_KEYWORDS)
+
+
+def is_safe_network_url(url: str) -> bool:
+    """Block non-web schemes and private/local destinations before Chromium fetches them."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        if parsed.username is not None or parsed.password is not None:
+            return False
+        host = parsed.hostname.rstrip(".").lower()
+        if host in {"localhost", "metadata", "metadata.google.internal", "host.docker.internal"}:
+            return False
+        if host.endswith((".localhost", ".local", ".internal", ".cluster.local", ".svc", ".test", ".invalid")):
+            return False
+        try:
+            port = parsed.port
+        except ValueError:
+            return False
+        if port is not None and port not in {80, 443}:
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            try:
+                # inet_aton also recognizes legacy decimal/octal/hex IPv4 forms.
+                address = ipaddress.ip_address(socket.inet_aton(host))
+            except OSError:
+                address = None
+        return address is None or address.is_global
+    except (TypeError, ValueError):
+        return False
+
+
+def trusted_profile_hosts(source_url: str) -> set[str]:
+    parsed = urlsplit(source_url)
+    if parsed.scheme != "https" or not parsed.hostname or not is_safe_network_url(source_url):
+        raise ValueError(f"Unsafe source URL: {source_url}")
+    host = parsed.hostname.rstrip(".").lower()
+    base = host[4:] if host.startswith("www.") else host
+    return {base, f"www.{base}"}
+
+
+def is_trusted_profile_url(url: str, allowed_hosts: set[str]) -> bool:
+    if not is_safe_network_url(url):
+        return False
+    host = urlsplit(url).hostname
+    return bool(host and host.rstrip(".").lower() in allowed_hosts)
+
+
+async def block_private_network_requests(route, request):
+    if is_safe_network_url(request.url):
+        await route.continue_()
+    else:
+        await route.abort()
 
 
 def email_from_mailto_href(href: str) -> str:
@@ -184,7 +241,7 @@ async def mailto_people(page, person_name="", party=None, role=None):
     return people
 
 
-async def visit_profiles(context, urls, extract, *, wait_until="domcontentloaded", settle=0.5, pause=0.3):
+async def visit_profiles(context, urls, extract, *, allowed_hosts, wait_until="domcontentloaded", settle=0.5, pause=0.3):
     """Gemensamt skelett för alla profilside-skrapare: öppnar varje URL i en
     egen flik, väntar in sidan, och samlar person-tuplerna som
     extract(page, url) returnerar. En sida som felar hoppas över tyst —
@@ -194,6 +251,9 @@ async def visit_profiles(context, urls, extract, *, wait_until="domcontentloaded
     mellan sidorna (god nätgranne)."""
     people = set()
     for url in urls:
+        if not is_trusted_profile_url(url, allowed_hosts):
+            log.warning("Skipping profile URL outside the source host allowlist")
+            continue
         page = await context.new_page()
         try:
             await page.goto(url, timeout=30000, wait_until=wait_until)
@@ -267,7 +327,7 @@ async def scrape_netpublicator(context, namn, registry_id, board_id):
             person_name, party_from_page = await extract_person_name(p2)
             return await mailto_people(p2, person_name, party or party_from_page, role)
 
-        people = await visit_profiles(context, list(info_by_url), extract)
+        people = await visit_profiles(context, list(info_by_url), extract, allowed_hosts=trusted_profile_hosts(board_url))
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -324,7 +384,7 @@ async def scrape_troman(context, namn, org_url):
             role = await extract_troman_role(p2)
             return await mailto_people(p2, person_name, party, role)
 
-        people = await visit_profiles(context, person_urls, extract)
+        people = await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(org_url))
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -377,7 +437,7 @@ async def scrape_w3d3(context, namn, board_url):
             person_name, party = await extract_person_name(p2)
             return {(person_name, email, party, None)}
 
-        people = await visit_profiles(context, person_urls, extract, settle=0.3)
+        people = await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(board_url), settle=0.3)
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -410,7 +470,7 @@ async def scrape_fmr(context, namn, board_url):
             person_name, party = await extract_person_name(p2)
             return await mailto_people(p2, person_name, party)
 
-        people = await visit_profiles(context, person_urls, extract, wait_until="networkidle", settle=0.3)
+        people = await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(board_url), wait_until="networkidle", settle=0.3)
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -455,7 +515,7 @@ async def scrape_profilsidor(context, namn, url, link_pattern, domain):
             person_name, party = await extract_person_name(p2)
             return await collect(p2, person_name, party)
 
-        people.update(await visit_profiles(context, person_urls, extract, settle=0.2, pause=0.2))
+        people.update(await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(url), settle=0.2, pause=0.2))
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -808,6 +868,7 @@ async def main():
             locale="sv-SE",
             timezone_id="Europe/Stockholm",
         )
+        await context.route("**/*", block_private_network_requests)
 
         for region in sources.load("regioner"):
             namn = region["namn"]
