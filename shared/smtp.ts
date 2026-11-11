@@ -124,7 +124,7 @@ export async function sendSmtpMail(
     await conn.write("DATA");
     await expect(await conn.read(), 354, "Servern accepterade inte DATA");
     const message = buildMimeMessage(from, to, opts.subject, opts.html, opts.attachments ?? []);
-    const stuffed = message.replace(/\r?\n\./g, "\n..");
+    const stuffed = message.replace(/\r?\n\./g, "\r\n..");
     await conn.write(`${stuffed}\r\n.`);
     await expect(await conn.read(), 250, "Mejlet accepterades inte av servern");
   } finally {
