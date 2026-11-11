@@ -11,8 +11,8 @@ async function promoteAdmin(env: Env): Promise<void> {
   const email = env.ADMIN_EMAIL?.trim().toLowerCase();
   if (!email) return;
   await env.DB.prepare(
-    `UPDATE accounts SET is_admin = 1, email_verified = 1
-     WHERE lower(email) = ? AND (is_admin = 0 OR email_verified = 0)`,
+    `UPDATE accounts SET is_admin = 1
+     WHERE lower(trim(email)) = ? AND email_verified = 1 AND is_admin = 0`,
   )
     .bind(email)
     .run();
