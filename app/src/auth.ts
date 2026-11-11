@@ -17,7 +17,6 @@ import {
   deleteAccount,
   type Env,
 } from "./db";
-import { enforceAttemptLimit, recordFailedAttempt, clearAttempts } from "./rate-limit";
 import { loginDiagnosticEvent } from "./login-diagnostic";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 dagar
@@ -170,7 +169,6 @@ export async function verifyEmail(env: Env, accountId: string, code: string): Pr
   });
   const ok = await verifyAccountEmail(env.DB, accountId, code);
   if (!ok) {
-    await recordFailedAttempt(env, "verify", accountId, CODE_WINDOW_SECONDS);
     throw new Error("Felaktig eller utgången kod");
   }
   await clearAttempts(env, "verify", accountId);
@@ -206,7 +204,6 @@ export async function login(
   const diagnostic = loginDiagnosticEvent(Boolean(account), passwordOk);
   if (diagnostic) console.info(diagnostic);
   if (!account || !passwordOk) {
-    await recordFailedAttempt(env, "login", email, LOGIN_WINDOW_SECONDS);
     throw new Error("Fel e-post eller lösenord");
   }
 
@@ -218,7 +215,6 @@ export async function login(
     if (!totpCode) throw new Error("TOTP_REQUIRED");
     const validTotp = await verifyTotpCode(account.totp_secret as string, totpCode);
     if (!validTotp) {
-      await recordFailedAttempt(env, "login", email, LOGIN_WINDOW_SECONDS);
       throw new Error("Fel TOTP-kod");
     }
   }
@@ -255,7 +251,6 @@ export async function reauthenticateAccount(
       account.password_salt as string,
     );
     if (!passwordOk) {
-      await recordFailedAttempt(env, "reauth", accountId, LOGIN_WINDOW_SECONDS);
       throw new Error("Fel lösenord");
     }
     verifiedFactor = true;
@@ -265,7 +260,6 @@ export async function reauthenticateAccount(
     if (!totpCode) throw new Error("TOTP_REQUIRED");
     const validTotp = await verifyTotpCode(account.totp_secret as string, totpCode);
     if (!validTotp) {
-      await recordFailedAttempt(env, "reauth", accountId, LOGIN_WINDOW_SECONDS);
       throw new Error("Fel TOTP-kod");
     }
     verifiedFactor = true;
@@ -345,7 +339,6 @@ export async function confirmTotpSetup(env: Env, accountId: string, code: string
   if (!secret) throw new Error("Ingen TOTP-uppsättning pågår eller så har den gått ut");
   const valid = await verifyTotpCode(secret, code);
   if (!valid) {
-    await recordFailedAttempt(env, "totp-setup", accountId, CODE_WINDOW_SECONDS);
     throw new Error("Fel kod — kontrollera att klockan på din enhet är rätt");
   }
   await clearAttempts(env, "totp-setup", accountId);
