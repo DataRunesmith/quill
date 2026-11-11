@@ -222,6 +222,14 @@ async function baseAppEnvForRequest(req: Request, primaryEnv: Env, bearer: boole
 }
 
 async function requestBodyExceedsLimit(req: Request, maxBytes: number): Promise<boolean> {
+  const contentLengthHeader = req.headers.get("Content-Length");
+  if (contentLengthHeader !== null) {
+    if (!/^\\d+$/.test(contentLengthHeader)) return true;
+    const contentLength = Number(contentLengthHeader);
+    if (!Number.isSafeInteger(contentLength) || contentLength > maxBytes) return true;
+    return false;
+  }
+
   const body = req.clone().body;
   if (!body) return false;
   const reader = body.getReader();
@@ -239,6 +247,13 @@ async function requestBodyExceedsLimit(req: Request, maxBytes: number): Promise<
   } finally {
     reader.releaseLock();
   }
+}
+
+function requestBodyLimit(pathname: string): number {
+  if (pathname === "/api/send") return MAX_SEND_REQUEST_BYTES;
+  if (pathname === "/api/feedback") return 64 * 1024;
+  if (pathname === "/api/client-error") return 32 * 1024;
+  return 5 * 1024 * 1024;
 }
 
 async function secureFetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -273,32 +288,23 @@ async function secureFetch(req: Request, env: Env, ctx: ExecutionContext): Promi
       );
   }
   if (
+    req.method !== "GET" &&
+    req.method !== "HEAD" &&
+    req.method !== "OPTIONS" &&
+    url.pathname.startsWith("/api/") &&
+    (await requestBodyExceedsLimit(req, requestBodyLimit(url.pathname)))
+  ) {
+    return withSecurityHeaders(json({ error: "För stor begäran" }, 413), url.pathname);
+  }
+  if (
     req.method === "POST" &&
     (url.pathname === "/api/feedback" || url.pathname === "/api/client-error")
   ) {
-    const maxBytes = url.pathname === "/api/feedback" ? 64 * 1024 : 32 * 1024;
-    const contentLength = Number(req.headers.get("Content-Length") ?? 0);
-    if (Number.isFinite(contentLength) && contentLength > maxBytes)
-      return withSecurityHeaders(json({ error: "För stor begäran" }, 413), url.pathname);
     if (!(await allowPublicWrite(req, primaryEnv, url.pathname)))
       return withSecurityHeaders(
         json({ error: "För många anrop — försök igen senare" }, 429),
         url.pathname,
       );
-  }
-  if (req.method === "POST" && url.pathname === "/api/send") {
-    const contentLengthHeader = req.headers.get("Content-Length");
-    const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
-    if (
-      (contentLength !== null &&
-        (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > MAX_SEND_REQUEST_BYTES)) ||
-      (contentLength === null && (await requestBodyExceedsLimit(req, MAX_SEND_REQUEST_BYTES)))
-    ) {
-      return withSecurityHeaders(
-        json({ error: "Utskicket innehåller för mycket data" }, 413),
-        url.pathname,
-      );
-    }
   }
   const appEnv = await baseAppEnvForRequest(req, primaryEnv, bearer);
   const response = await baseApp.fetch(req, appEnv, ctx);
