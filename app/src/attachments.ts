@@ -30,42 +30,63 @@ export async function processAttachments(
 ): Promise<{ extractedHtml: string }> {
   let extractedHtml = "";
   const normalized = validateAttachmentBatch(attachments);
+  const storedKeys: string[] = [];
 
-  for (let index = 0; index < attachments.length; index++) {
-    const att = attachments[index];
-    const meta = normalized[index];
-    if (att.mode !== "attach" && att.mode !== "extract") throw new Error("Ogiltigt bilageläge");
+  try {
+    for (let index = 0; index < attachments.length; index++) {
+      const att = attachments[index];
+      const meta = normalized[index];
+      if (att.mode !== "attach" && att.mode !== "extract") throw new Error("Ogiltigt bilageläge");
 
-    const bytes = base64ToBytes(att.base64Data);
-    if (bytes.byteLength !== meta.estimatedBytes)
-      throw new Error(`${meta.filename} kunde inte valideras.`);
+      const bytes = base64ToBytes(att.base64Data);
+      if (bytes.byteLength !== meta.estimatedBytes)
+        throw new Error(`${meta.filename} kunde inte valideras.`);
 
-    if (att.mode === "extract") {
-      const html = await convertToHtml(
-        meta.filename,
-        meta.contentType,
-        bytes.buffer as ArrayBuffer,
-      );
-      extractedHtml += `\n<hr>\n${html}`;
-    }
+      if (att.mode === "extract") {
+        const html = await convertToHtml(
+          meta.filename,
+          meta.contentType,
+          bytes.buffer as ArrayBuffer,
+        );
+        extractedHtml += `\n<hr>\n${html}`;
+      }
 
-    const r2Key = `${letterId}/${randomId()}-${meta.filename}`;
-    await env.ATTACHMENTS.put(r2Key, bytes, { httpMetadata: { contentType: meta.contentType } });
-    await env.DB.prepare(
-      `INSERT INTO letter_attachments (id, letter_id, filename, content_type, r2_key, size_bytes, mode, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        randomId(),
-        letterId,
-        meta.filename,
-        meta.contentType,
-        r2Key,
-        bytes.byteLength,
-        att.mode,
-        Date.now(),
+      const r2Key = `${letterId}/${randomId()}-${meta.filename}`;
+      await env.ATTACHMENTS.put(r2Key, bytes, { httpMetadata: { contentType: meta.contentType } });
+      storedKeys.push(r2Key);
+      await env.DB.prepare(
+        `INSERT INTO letter_attachments (id, letter_id, filename, content_type, r2_key, size_bytes, mode, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run();
+        .bind(
+          randomId(),
+          letterId,
+          meta.filename,
+          meta.contentType,
+          r2Key,
+          bytes.byteLength,
+          att.mode,
+          Date.now(),
+        )
+        .run();
+    }
+  } catch (error) {
+    let cleanupComplete = true;
+    for (let offset = 0; offset < storedKeys.length; offset += 1000) {
+      try {
+        await env.ATTACHMENTS.delete(storedKeys.slice(offset, offset + 1000));
+      } catch {
+        cleanupComplete = false;
+      }
+    }
+    if (cleanupComplete && storedKeys.length) {
+      await env.DB.prepare("DELETE FROM letter_attachments WHERE letter_id = ?")
+        .bind(letterId)
+        .run();
+    }
+    if (!cleanupComplete)
+      throw new Error("Bilagorna kunde inte behandlas och R2-städningen misslyckades. Försök igen senare.");
+    throw error;
   }
 
   return { extractedHtml };
