@@ -37,7 +37,7 @@ function normalizeEmail(email: string): string {
 }
 
 export function getAuthorizeUrl(provider: string, env: Env, state: string): string {
-  const cfg = PROVIDERS[provider];
+  const cfg = Object.hasOwn(PROVIDERS, provider) ? PROVIDERS[provider] : undefined;
   if (!cfg) throw new Error("Okänd eller avvecklad inloggningsleverantör");
   const clientId = env[cfg.clientIdEnvKey] as string | undefined;
   if (!clientId) throw new Error(`${provider}-inloggning är inte konfigurerad än`);
@@ -207,7 +207,7 @@ export async function unlinkOAuthIdentity(
   accountId: string,
   provider: string,
 ): Promise<void> {
-  if (!(provider in PROVIDERS)) throw new Error("Okänd eller avvecklad inloggningsleverantör");
+  if (!Object.hasOwn(PROVIDERS, provider)) throw new Error("Okänd eller avvecklad inloggningsleverantör");
 
   const account = await env.DB.prepare("SELECT password_set_by_user FROM accounts WHERE id = ?")
     .bind(accountId)
@@ -229,7 +229,7 @@ export async function unlinkOAuthIdentity(
 }
 
 export function providerSharesLoginCallback(provider: string): boolean {
-  return provider in PROVIDERS;
+  return Object.hasOwn(PROVIDERS, provider);
 }
 
 export function getLinkAuthorizeUrl(provider: string, env: Env, state: string): string {
