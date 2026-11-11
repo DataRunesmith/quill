@@ -100,8 +100,8 @@ function needsFreshSession(method: string, pathname: string): boolean {
   )
     return true;
   if (
-    method === "GET" &&
-    /^\/api\/(?:oauth-link\/[a-z]+|oauth-mail\/microsoft)\/start$/.test(pathname)
+    (method === "POST" && /^\/api\/oauth-link\/[a-z]+\/start$/.test(pathname)) ||
+    (method === "GET" && pathname === "/api/oauth-mail/microsoft/start")
   )
     return true;
   return false;
