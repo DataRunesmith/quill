@@ -606,3 +606,6 @@ coverage/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Local Claude Code statusline script, kept outside the repository
+statusline.sh
