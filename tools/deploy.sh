@@ -11,7 +11,7 @@
 # D1 migrations are applied before the Worker is uploaded. Arguments after the
 # values file go to `wrangler deploy`, for example --dry-run.
 set -eu
-case ${1:-} in
+case "${1:-}" in
   "" | -*)
     values=-
     [ "${1:-}" != - ] || shift
@@ -36,6 +36,28 @@ if [ "$values" = - ]; then
   }
 fi
 
+# The value of a name, from the values file or from the environment.
+value_of() {
+  if [ "$values" = - ]; then
+    printenv "$1" || true
+  else
+    sed -n "s/^$1=//p" "$values" | tail -n 1
+  fi
+}
+
+# Wrangler takes its own credentials from the environment; a values file may
+# carry them as well.
+for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+  [ -z "$(printenv "$name" || true)" ] || continue
+  value=$(value_of "$name")
+  [ -z "$value" ] || export "$name=$value"
+done
+
+dry_run=
+for arg in "$@"; do
+  [ "$arg" != --dry-run ] || dry_run=1
+done
+
 [ -d app/node_modules/wrangler ] || (cd app && npm ci --no-audit --no-fund)
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
@@ -51,9 +73,5 @@ else
 fi
 
 cd app
-dry_run=
-for arg in "$@"; do
-  [ "$arg" != --dry-run ] || dry_run=1
-done
 [ -n "$dry_run" ] || npx wrangler d1 migrations apply DB --remote
 npx wrangler deploy "$@"

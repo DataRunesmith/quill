@@ -33,27 +33,6 @@ jobs:
     needs: configured
     if: needs.configured.outputs.ready == 'true'
     runs-on: ubuntu-latest
-    # Every name in cloudflare.example.env, read from the repository secrets.
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      PUBLIC_HOST: ${{ secrets.PUBLIC_HOST }}
-      SYSTEM_FROM_ADDRESS: ${{ secrets.SYSTEM_FROM_ADDRESS }}
-      TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
-      TURNSTILE_HOSTNAMES: ${{ secrets.TURNSTILE_HOSTNAMES }}
-      D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
-      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
-      KV_SESSIONS_ID: ${{ secrets.KV_SESSIONS_ID }}
-      SYSTEM_SMTP_HOST: ${{ secrets.SYSTEM_SMTP_HOST }}
-      SYSTEM_SMTP_PORT: ${{ secrets.SYSTEM_SMTP_PORT }}
-      SYSTEM_SMTP_USER: ${{ secrets.SYSTEM_SMTP_USER }}
-      FEEDBACK_NOTIFY_EMAIL: ${{ secrets.FEEDBACK_NOTIFY_EMAIL }}
-      OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
-      OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.OAUTH_MICROSOFT_CLIENT_ID }}
-      THEME_KEY_PREFIX: ${{ secrets.THEME_KEY_PREFIX }}
-      THEME_COOKIE_DOMAIN: ${{ secrets.THEME_COOKIE_DOMAIN }}
-      SITE_FAMILY: ${{ secrets.SITE_FAMILY }}
-      DONATION_HTML: ${{ secrets.DONATION_HTML }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -69,3 +48,24 @@ jobs:
       - run: npm test
         working-directory: app
       - run: sh tools/deploy.sh
+        # Every name in cloudflare.example.env, read from the repository secrets.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PUBLIC_HOST: ${{ secrets.PUBLIC_HOST }}
+          SYSTEM_FROM_ADDRESS: ${{ secrets.SYSTEM_FROM_ADDRESS }}
+          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
+          TURNSTILE_HOSTNAMES: ${{ secrets.TURNSTILE_HOSTNAMES }}
+          D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          KV_SESSIONS_ID: ${{ secrets.KV_SESSIONS_ID }}
+          SYSTEM_SMTP_HOST: ${{ secrets.SYSTEM_SMTP_HOST }}
+          SYSTEM_SMTP_PORT: ${{ secrets.SYSTEM_SMTP_PORT }}
+          SYSTEM_SMTP_USER: ${{ secrets.SYSTEM_SMTP_USER }}
+          FEEDBACK_NOTIFY_EMAIL: ${{ secrets.FEEDBACK_NOTIFY_EMAIL }}
+          OAUTH_GOOGLE_CLIENT_ID: ${{ secrets.OAUTH_GOOGLE_CLIENT_ID }}
+          OAUTH_MICROSOFT_CLIENT_ID: ${{ secrets.OAUTH_MICROSOFT_CLIENT_ID }}
+          THEME_KEY_PREFIX: ${{ secrets.THEME_KEY_PREFIX }}
+          THEME_COOKIE_DOMAIN: ${{ secrets.THEME_COOKIE_DOMAIN }}
+          SITE_FAMILY: ${{ secrets.SITE_FAMILY }}
+          DONATION_HTML: ${{ secrets.DONATION_HTML }}

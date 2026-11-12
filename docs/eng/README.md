@@ -25,6 +25,8 @@ ADMIN_EMAIL='you@example.com' docker compose up -d
 
 Open <http://localhost:8787> and register with that address; within a minute the account becomes the administrator. All data, including a generated encryption key, is kept in the `data` volume, so back that volume up. Without mail settings new accounts are verified directly. To have the app send verification and password mails, also set `SYSTEM_FROM_ADDRESS` together with either `RESEND_API_KEY` or `SYSTEM_SMTP_HOST`, `SYSTEM_SMTP_PORT`, `SYSTEM_SMTP_USER` and `SYSTEM_SMTP_PASSWORD`. Set `PUBLIC_HOST` to the host name the app is reached on; the links in those mails use it. Instead of typing the values on the command line you can put them in a file named `.env` next to `compose.yaml`; git ignores it.
 
+The port is published on this machine only. To reach the app from other machines, put a reverse proxy with HTTPS in front of it; `BIND_ADDRESS=0.0.0.0` publishes the port on every network interface without encryption, so use that on a trusted network only.
+
 ### Your values on Cloudflare
 
 The three Cloudflare ways use the same values. They are listed in `cloudflare.example.env`:
@@ -44,6 +46,8 @@ The three Cloudflare ways use the same values. They are listed in `cloudflare.ex
 | `THEME_COOKIE_DOMAIN` | Optional. A parent domain to share the theme setting with your other sites. |
 | `SITE_FAMILY` | Name shown for the default theme. |
 | `DONATION_HTML` | Optional. HTML shown where the app asks for support. |
+
+The commands below need Node.js; each step can also be done in the Cloudflare dashboard.
 
 Do this once, before the first deploy. The first two commands print the IDs for the table above:
 
@@ -105,7 +109,7 @@ npx wrangler login
 sh tools/deploy.sh .cloudflare.env
 ```
 
-Run the last command again whenever you want to deploy a newer version. `tools/deploy.sh` fills the values into a temporary copy, builds the documentation into `/docs` if python3 is installed, applies new database migrations, deploys the copy and removes it. Extra arguments go to `wrangler deploy`; `sh tools/deploy.sh .cloudflare.env --dry-run` builds without touching the database or uploading.
+Run the last command again whenever you want to deploy a newer version. `tools/deploy.sh` fills the values into a temporary copy, builds the documentation into `/docs` if python3 is installed, applies new database migrations, deploys the copy and removes it. Extra arguments go to `wrangler deploy`; `sh tools/deploy.sh .cloudflare.env --dry-run` builds without touching the database or uploading. If `.cloudflare.env` also has the lines `CLOUDFLARE_API_TOKEN=...` and `CLOUDFLARE_ACCOUNT_ID=...`, they are used and `wrangler login` is not needed.
 
 ### GitHub Actions
 

@@ -4,8 +4,10 @@ services:
   quill:
     build: .
     restart: unless-stopped
+    # Published on this machine only. To reach it from elsewhere, put a reverse
+    # proxy with HTTPS in front; BIND_ADDRESS=0.0.0.0 opens the plain-HTTP port.
     ports:
-      - "8787:8787"
+      - "${BIND_ADDRESS:-127.0.0.1}:8787:8787"
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL to the address of the first administrator}

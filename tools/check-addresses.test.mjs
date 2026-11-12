@@ -4,8 +4,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const checker = new URL("./check-addresses.mjs", import.meta.url);
+const checker = fileURLToPath(new URL("./check-addresses.mjs", import.meta.url));
 
 for (const [text, expected] of [
   [["user", "v1.2"].join("@"), 1],
@@ -14,6 +15,7 @@ for (const [text, expected] of [
   ["uses: actions/checkout@v7.0.1", 0],
   ["uses: owner/repo/subaction@v1.2", 0],
   ["`owner/repo@v1.2.3`", 0],
+  ["[actions/checkout@v7.0.1](https://example.com/checkout)", 0],
   ["package@1.2.3", 0],
   ["scope@file.mjs", 0],
   ["user@example.com", 0],
@@ -25,7 +27,7 @@ for (const [text, expected] of [
       execFileSync("git", ["init", "--quiet"], { cwd });
       writeFileSync(join(cwd, "fixture.txt"), text);
       execFileSync("git", ["add", "fixture.txt"], { cwd });
-      const result = spawnSync(process.execPath, [checker.pathname], { cwd, encoding: "utf8" });
+      const result = spawnSync(process.execPath, [checker], { cwd, encoding: "utf8" });
       assert.equal(result.status, expected, result.stderr);
       if (expected === 1) assert.ok(result.stderr.includes("fixture.txt:1:"));
     } finally {

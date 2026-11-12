@@ -8,4 +8,7 @@ site
 site-docs
 kontakter
 *.env
+**/*.env
+**/.env.*
+**/.dev.vars*
 !*.example.env

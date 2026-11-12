@@ -33,7 +33,7 @@ for (const path of files) {
       if (line[match.index - 1] === ":") continue; // user:password@host in a URL
       const domain = match[1].replace(/\.$/, "");
       const actionReference = /^v\d+(?:\.\d+)*$/i.test(domain) &&
-        /(?:^|[\s"'`(])[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+\/)*$/.test(
+        /(?:^|[\s"'`(\[])[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+\/)*$/.test(
           line.slice(0, match.index),
         );
       if (!RESERVED.test(domain) && !NOT_AN_ADDRESS.test(domain) && !actionReference)
