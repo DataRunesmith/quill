@@ -109,7 +109,7 @@ npx wrangler login
 sh tools/deploy.sh .cloudflare.env
 ```
 
-Run the last command again whenever you want to deploy a newer version. `tools/deploy.sh` fills the values into a temporary copy, builds the documentation into `/docs` if python3 is installed, applies new database migrations, deploys the copy and removes it. Extra arguments go to `wrangler deploy`; `sh tools/deploy.sh .cloudflare.env --dry-run` builds without touching the database or uploading. If `.cloudflare.env` also has the lines `CLOUDFLARE_API_TOKEN=...` and `CLOUDFLARE_ACCOUNT_ID=...`, they are used and `wrangler login` is not needed; a variable already set in your shell wins over the file.
+Run the last command again whenever you want to deploy a newer version. `tools/deploy.sh` fills the values into a temporary copy, builds the documentation into `/docs` if python3 is installed, applies new database migrations, deploys the copy and removes it. Extra arguments go to `wrangler deploy`; `sh tools/deploy.sh .cloudflare.env --dry-run` builds without touching the database or uploading. If `.cloudflare.env` also has the lines `CLOUDFLARE_API_TOKEN=...` and `CLOUDFLARE_ACCOUNT_ID=...`, they are used and `wrangler login` is not needed; if either of the two is already exported in your shell, that value wins over the file.
 
 ### GitHub Actions
 

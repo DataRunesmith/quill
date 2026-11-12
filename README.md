@@ -109,7 +109,7 @@ npx wrangler login
 sh tools/deploy.sh .cloudflare.env
 ```
 
-Kör det sista kommandot igen när du vill driftsätta en nyare version. `tools/deploy.sh` fyller i värdena i en tillfällig kopia, bygger dokumentationen till `/docs` om python3 finns, kör nya databasmigreringar, driftsätter kopian och tar bort den. Extra argument går vidare till `wrangler deploy`; `sh tools/deploy.sh .cloudflare.env --dry-run` bygger utan att röra databasen eller ladda upp något. Om `.cloudflare.env` också har raderna `CLOUDFLARE_API_TOKEN=...` och `CLOUDFLARE_ACCOUNT_ID=...` används de, och `wrangler login` behövs inte; en variabel som redan är satt i skalet går före filen.
+Kör det sista kommandot igen när du vill driftsätta en nyare version. `tools/deploy.sh` fyller i värdena i en tillfällig kopia, bygger dokumentationen till `/docs` om python3 finns, kör nya databasmigreringar, driftsätter kopian och tar bort den. Extra argument går vidare till `wrangler deploy`; `sh tools/deploy.sh .cloudflare.env --dry-run` bygger utan att röra databasen eller ladda upp något. Om `.cloudflare.env` också har raderna `CLOUDFLARE_API_TOKEN=...` och `CLOUDFLARE_ACCOUNT_ID=...` används de, och `wrangler login` behövs inte; om någon av de två redan är exporterad i skalet går det värdet före filen.
 
 ### GitHub Actions
 
