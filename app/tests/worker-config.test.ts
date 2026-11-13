@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const wrangler = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+const containerEntry = readFileSync(new URL("../../docker/container-entry.ts", import.meta.url), "utf8");
 
 test("production config keeps all runtime bindings", () => {
   assert.equal(wrangler.name, "quill");
@@ -21,4 +22,11 @@ test("only the production custom domain is exposed", () => {
   assert.equal(wrangler.workers_dev, false);
   assert.equal(wrangler.preview_urls, false);
   assert.equal(wrangler.previews, undefined);
+});
+
+test("Docker bootstrap never adopts or elevates an existing account", () => {
+  assert.match(containerEntry, /existing-account-requires-manual-review/);
+  assert.match(containerEntry, /INSERT OR IGNORE INTO accounts/);
+  assert.doesNotMatch(containerEntry, /UPDATE accounts/);
+  assert.doesNotMatch(containerEntry, /SET is_admin = 1, email_verified = 1/);
 });

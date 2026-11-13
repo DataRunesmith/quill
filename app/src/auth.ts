@@ -8,6 +8,7 @@ import {
 import { sendSmtpMail } from "../../shared/smtp";
 import { sendResendMail } from "../../shared/resend";
 import { htmlToText } from "../../shared/html";
+import { validateMailboxAddress } from "../../shared/input-safety";
 import { generateTotpSecret, totpAuthUri, verifyTotpCode } from "../../shared/totp";
 import {
   createAccount,
@@ -17,7 +18,7 @@ import {
   deleteAccount,
   type Env,
 } from "./db";
-import { enforceAttemptLimit, recordFailedAttempt, clearAttempts } from "./rate-limit";
+import { clearAttempts, enforceAttemptLimit } from "./rate-limit";
 import { loginDiagnosticEvent } from "./login-diagnostic";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 dagar
@@ -28,6 +29,13 @@ const SESSION_BINDING_PREFIX = "sessionbind:";
 // Resend kräver att avsändaren ligger på en verifierad domän.
 // Return-Path och dess DNS-poster hanteras separat i Resend.
 const SYSTEM_RESEND_FROM = "Quill <__SYSTEM_FROM_ADDRESS__>";
+
+function normalizeAccountEmail(value: string): string {
+  if (typeof value !== "string") throw new Error("Ogiltig e-postadress");
+  const email = validateMailboxAddress(value, "e-postadress").toLocaleLowerCase("sv-SE");
+  if (email.length > 254) throw new Error("E-postadressen är för lång");
+  return email;
+}
 
 // Brute-force-spärrar (försök inom glidande fönster). Lösenords-/TOTP-koll
 // och e-postverifiering har annars inga försöksgränser — utan detta är en
@@ -133,6 +141,7 @@ export async function signup(
   email: string,
   password: string,
 ): Promise<{ accountId: string; verified?: true }> {
+  email = normalizeAccountEmail(email);
   const existing = await getAccountByEmail(env.DB, email);
   if (existing) throw new Error("E-postadressen är redan registrerad");
   if (password.length < 10) throw new Error("Lösenordet måste vara minst 10 tecken");
@@ -170,7 +179,6 @@ export async function verifyEmail(env: Env, accountId: string, code: string): Pr
   });
   const ok = await verifyAccountEmail(env.DB, accountId, code);
   if (!ok) {
-    await recordFailedAttempt(env, "verify", accountId, CODE_WINDOW_SECONDS);
     throw new Error("Felaktig eller utgången kod");
   }
   await clearAttempts(env, "verify", accountId);
@@ -186,6 +194,7 @@ export async function login(
   // konton — annars skulle ett uteblivet lockout avslöja vilka adresser som
   // saknas. Misslyckade inloggningar (fel konto/lösenord/TOTP) räknas upp,
   // ett lyckat login nollställer.
+  email = normalizeAccountEmail(email);
   await enforceAttemptLimit(env, "login", email, {
     max: LOGIN_MAX_ATTEMPTS,
     windowSeconds: LOGIN_WINDOW_SECONDS,
@@ -206,7 +215,6 @@ export async function login(
   const diagnostic = loginDiagnosticEvent(Boolean(account), passwordOk);
   if (diagnostic) console.info(diagnostic);
   if (!account || !passwordOk) {
-    await recordFailedAttempt(env, "login", email, LOGIN_WINDOW_SECONDS);
     throw new Error("Fel e-post eller lösenord");
   }
 
@@ -218,7 +226,6 @@ export async function login(
     if (!totpCode) throw new Error("TOTP_REQUIRED");
     const validTotp = await verifyTotpCode(account.totp_secret as string, totpCode);
     if (!validTotp) {
-      await recordFailedAttempt(env, "login", email, LOGIN_WINDOW_SECONDS);
       throw new Error("Fel TOTP-kod");
     }
   }
@@ -255,7 +262,6 @@ export async function reauthenticateAccount(
       account.password_salt as string,
     );
     if (!passwordOk) {
-      await recordFailedAttempt(env, "reauth", accountId, LOGIN_WINDOW_SECONDS);
       throw new Error("Fel lösenord");
     }
     verifiedFactor = true;
@@ -265,7 +271,6 @@ export async function reauthenticateAccount(
     if (!totpCode) throw new Error("TOTP_REQUIRED");
     const validTotp = await verifyTotpCode(account.totp_secret as string, totpCode);
     if (!validTotp) {
-      await recordFailedAttempt(env, "reauth", accountId, LOGIN_WINDOW_SECONDS);
       throw new Error("Fel TOTP-kod");
     }
     verifiedFactor = true;
@@ -277,6 +282,7 @@ export async function reauthenticateAccount(
 }
 
 export async function requestPasswordReset(env: Env, email: string): Promise<void> {
+  email = normalizeAccountEmail(email);
   const account = await getAccountByEmail(env.DB, email);
   if (!account) return; // avslöja inte om e-posten finns eller inte
 
@@ -345,7 +351,6 @@ export async function confirmTotpSetup(env: Env, accountId: string, code: string
   if (!secret) throw new Error("Ingen TOTP-uppsättning pågår eller så har den gått ut");
   const valid = await verifyTotpCode(secret, code);
   if (!valid) {
-    await recordFailedAttempt(env, "totp-setup", accountId, CODE_WINDOW_SECONDS);
     throw new Error("Fel kod — kontrollera att klockan på din enhet är rätt");
   }
   await clearAttempts(env, "totp-setup", accountId);
@@ -399,7 +404,7 @@ export async function setAccountDisabled(
   disabled: boolean,
 ): Promise<void> {
   await env.DB.prepare(
-    "UPDATE accounts SET disabled = ?, security_version = security_version + 1 WHERE id = ?",
+    "UPDATE accounts SET disabled = ?, security_version = security_version + 1 WHERE id = ? AND deletion_requested_at IS NULL",
   )
     .bind(disabled ? 1 : 0, targetAccountId)
     .run();
@@ -419,18 +424,11 @@ export async function deleteOwnAccount(
   const account = await getAccountById(env.DB, accountId);
   if (!account) throw new Error("Konto saknas");
 
-  if (account.password_set_by_user) {
-    const ok = await verifyPassword(
-      password ?? "",
-      account.password_hash as string,
-      account.password_salt as string,
-    );
-    if (!ok) throw new Error("Fel lösenord");
-  }
-  if (account.totp_enabled) {
-    if (!totpCode) throw new Error("TOTP_REQUIRED");
-    const valid = await verifyTotpCode(account.totp_secret as string, totpCode);
-    if (!valid) throw new Error("Fel TOTP-kod");
+  // Local factors must use the same rate-limited reauthentication path as
+  // other sensitive account changes. OAuth-only accounts are protected by
+  // secure-index's fresh-session gate before this function is reached.
+  if (account.password_set_by_user || account.totp_enabled) {
+    await reauthenticateAccount(env, accountId, password, totpCode);
   }
 
   await deleteAccount(env, accountId);

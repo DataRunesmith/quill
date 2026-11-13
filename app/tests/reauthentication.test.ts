@@ -14,7 +14,6 @@ test("reauthentication verifies account factors before refreshing the same sessi
   assertSourceMatch(authSource, /verifyPassword\(password \?\? "", account\.password_hash/);
   assertSourceMatch(authSource, /if \(account\.totp_enabled\)/);
   assertSourceMatch(authSource, /verifyTotpCode\(account\.totp_secret as string, totpCode\)/);
-  assertSourceMatch(authSource, /recordFailedAttempt\(env, "reauth", accountId/);
   assertSourceMatch(
     authSource,
     /if \(!verifiedFactor\) throw new Error\("Bekräfta kontot med ditt externa inloggningssätt"\)/,
@@ -54,4 +53,21 @@ test("OAuth-only sessions use a linked identity instead of silently extending fr
   assertSourceMatch(appSource, /rawApi\('\/api\/oauth-identities'\)/);
   assertSourceMatch(appSource, /Du behöver inte logga ut/);
   assertSourceMatch(appSource, /pending:route/);
+});
+
+test("account deletion requires a fresh web session and cookie mutations fail closed without same-origin Origin", () => {
+  assert.ok(secureIndexSource.includes('"/api/delete-account"'));
+  assertSourceMatch(authSource, /if \(account\.password_set_by_user \|\| account\.totp_enabled\) \{\s*await reauthenticateAccount\(env, accountId, password, totpCode\)/);
+  assertSourceMatch(secureIndexSource, /return req\.headers\.get\("Origin"\) !== url\.origin/);
+  assertSourceMatch(secureIndexSource, /requestBodyExceedsLimit\(req, requestBodyLimit\(url\.pathname\)\)/);
+});
+
+test("authentication attempt limits are atomic and fail closed through Durable Objects", () => {
+  const limiterSource = readFileSync(new URL("../src/rate-limiter.ts", import.meta.url), "utf8");
+  const rateLimitSource = readFileSync(new URL("../src/rate-limit.ts", import.meta.url), "utf8");
+  assertSourceMatch(rateLimitSource, /RATE_LIMITER\.idFromName\(\`auth-attempt:/);
+  assertSourceMatch(rateLimitSource, /\/attempt/);
+  assertSourceMatch(limiterSource, /pathname === "\/attempt"/);
+  assertSourceMatch(limiterSource, /count \+ 1/);
+  assertSourceMatch(authSource, /enforceAttemptLimit\(env, "reauth", accountId/);
 });
