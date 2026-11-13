@@ -9,8 +9,14 @@ type PrivacyEnv = Env & { LETTER_DATA_KEY?: string };
 function keyFor(env: PrivacyEnv): string {
   return env.LETTER_DATA_KEY || env.MAIL_CRED_KEY;
 }
+// Letters stored before the prefix was treated as untrusted could be plaintext
+// that merely starts with "enc:v1:". Real ciphertext is base64 of at least a
+// 12-byte IV plus a 16-byte GCM tag, which such plaintext (HTML, spaces) is not.
+function isCiphertextShaped(payload: string): boolean {
+  return payload.length >= 40 && /^[A-Za-z0-9+/]+={0,2}$/.test(payload);
+}
 export function isEncryptedLetterData(value: string): boolean {
-  return value.startsWith(PREFIX);
+  return value.startsWith(PREFIX) && isCiphertextShaped(value.slice(PREFIX.length));
 }
 export async function encryptLetterData(env: PrivacyEnv, plaintext: string): Promise<string> {
   // The prefix and redaction marker are storage metadata, not trusted input.

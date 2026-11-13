@@ -71,16 +71,35 @@ cp "$site/docker/wrangler.template.jsonc" "$site/wrangler.jsonc"
 
 vars=$(mktemp)
 chmod 600 "$vars"
+# Wrangler reads this file as dotenv. Single quotes keep '#' and surrounding
+# whitespace literal; characters dotenv would still alter are refused instead
+# of being silently changed (a mangled admin password would be persisted).
+nl=$(printf '\nx'); nl=${nl%x}
+cr=$(printf '\rx'); cr=${cr%x}
+emit_var() {
+  name=$1
+  value=$(printenv "$name" || true)
+  [ -n "$value" ] || return 0
+  case "$value" in
+    *"'"* | *'$'* | *'\\'* | *"$nl"* | *"$cr"*)
+      echo "$name contains a character that cannot be passed safely (single quote, \$, backslash or newline)." >&2
+      exit 1
+      ;;
+  esac
+  printf "%s='%s'\n" "$name" "$value"
+}
 {
-  echo "MAIL_CRED_KEY=$MAIL_CRED_KEY"
-  echo "SYSTEM_FROM_ADDRESS=$SYSTEM_FROM_ADDRESS"
-  echo "TURNSTILE_SECRET=$TURNSTILE_SECRET"
-  echo "TURNSTILE_HOSTNAMES=$TURNSTILE_HOSTNAMES"
+  for name in MAIL_CRED_KEY SYSTEM_FROM_ADDRESS TURNSTILE_SECRET TURNSTILE_HOSTNAMES; do
+    value=$(printenv "$name" || true)
+    case "$value" in
+      *"'"* | *'$'* | *'\\'*) echo "$name contains a character that cannot be passed safely." >&2; exit 1 ;;
+    esac
+    printf "%s='%s'\n" "$name" "$value"
+  done
   for name in ADMIN_EMAIL ADMIN_PASSWORD SYSTEM_SMTP_HOST SYSTEM_SMTP_PORT SYSTEM_SMTP_USER SYSTEM_SMTP_PASSWORD \
     FEEDBACK_NOTIFY_EMAIL RESEND_API_KEY LETTER_DATA_KEY VISITOR_SALT OAUTH_GOOGLE_CLIENT_ID \
     OAUTH_GOOGLE_CLIENT_SECRET OAUTH_MICROSOFT_CLIENT_ID OAUTH_MICROSOFT_CLIENT_SECRET; do
-    value=$(printenv "$name" || true)
-    [ -n "$value" ] && echo "$name=$value"
+    emit_var "$name"
   done
 } >>"$vars"
 

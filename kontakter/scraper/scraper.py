@@ -17,6 +17,7 @@ import re
 import sys
 import socket
 import unicodedata
+import requests
 from io import BytesIO
 from urllib.parse import unquote, urlsplit
 from playwright.async_api import async_playwright, Error as PlaywrightError
@@ -86,8 +87,25 @@ def is_safe_network_url(url: str) -> bool:
                 address = ipaddress.ip_address(socket.inet_aton(host))
             except OSError:
                 address = None
-        return address is None or address.is_global
+        if address is not None:
+            return address.is_global
+        return True
     except (TypeError, ValueError):
+        return False
+
+
+def resolves_to_public_address(host: str) -> bool:
+    """Reject public-looking names whose DNS answer points at a private address."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    addresses = {info[4][0] for info in infos}
+    if not addresses:
+        return False
+    try:
+        return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
+    except ValueError:
         return False
 
 
@@ -101,17 +119,38 @@ def trusted_profile_hosts(source_url: str) -> set[str]:
 
 
 def is_trusted_profile_url(url: str, allowed_hosts: set[str]) -> bool:
-    if not is_safe_network_url(url):
+    if not is_safe_network_url(url) or urlsplit(url).scheme != "https":
         return False
     host = urlsplit(url).hostname
     return bool(host and host.rstrip(".").lower() in allowed_hosts)
 
 
 async def block_private_network_requests(route, request):
-    if is_safe_network_url(request.url):
-        await route.continue_()
-    else:
+    url = request.url
+    if not is_safe_network_url(url):
         await route.abort()
+        return
+    host = urlsplit(url).hostname or ""
+    if not await asyncio.to_thread(resolves_to_public_address, host.rstrip(".")):
+        await route.abort()
+        return
+    if not request.is_navigation_request():
+        await route.continue_()
+        return
+    # Fetch navigations without following redirects so every hop passes this
+    # handler again (the browser follows the 3xx we hand back).
+    try:
+        response = await route.fetch(max_redirects=0)
+    except PlaywrightError:
+        await route.abort()
+        return
+    location = response.headers.get("location")
+    if 300 <= response.status < 400 and location:
+        target = urlsplit(location)
+        if target.scheme and not is_safe_network_url(location):
+            await route.abort()
+            return
+    await route.fulfill(response=response)
 
 
 def email_from_mailto_href(href: str) -> str:
@@ -257,6 +296,9 @@ async def visit_profiles(context, urls, extract, *, allowed_hosts, wait_until="d
         page = await context.new_page()
         try:
             await page.goto(url, timeout=30000, wait_until=wait_until)
+            if not is_trusted_profile_url(page.url, allowed_hosts):
+                log.warning("Skipping profile that redirected outside the source host allowlist")
+                continue
             await asyncio.sleep(settle)
             people.update(await extract(page, url))
         except PlaywrightError:
@@ -715,6 +757,27 @@ async def scrape_mailto(context, namn, url):
     return people
 
 
+PDF_MAX_BYTES = 20 * 1024 * 1024
+PDF_MAX_PAGE_STREAM = 5 * 1024 * 1024
+
+
+def download_limited(url: str, max_bytes: int) -> bytes:
+    """Stream a download and stop at max_bytes; redirects are not followed."""
+    with requests.get(url, stream=True, timeout=(10, 60), allow_redirects=False) as response:
+        if response.status_code != 200:
+            raise ValueError(f"PDF-källan svarade med HTTP {response.status_code}")
+        declared = response.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > max_bytes:
+            raise ValueError("PDF-filen är större än 20 MiB")
+        chunks, size = [], 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            size += len(chunk)
+            if size > max_bytes:
+                raise ValueError("PDF-filen är större än 20 MiB")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
 async def scrape_pdf_lista(context, namn, url, domain):
     """Skrapar namn+mailadress-par ur en nedladdningsbar PDF-lista. Namnet plockas
     som bästa-försök ur texten som föregår e-postadressen på samma rad."""
@@ -723,15 +786,10 @@ async def scrape_pdf_lista(context, namn, url, domain):
         log.info(f"{namn}: hämtar {url}")
         if not is_safe_network_url(url) or urlsplit(url).scheme != "https":
             raise ValueError("PDF-källan måste vara en säker HTTPS-adress")
-        response = await context.request.get(url, timeout=60000, max_redirects=0)
-        if not response.ok:
-            raise ValueError(f"PDF-källan svarade med HTTP {response.status}")
-        content_length = response.headers.get("content-length")
-        if content_length and int(content_length) > 20 * 1024 * 1024:
-            raise ValueError("PDF-filen är större än 20 MiB")
-        data = await response.body()
-        if len(data) > 20 * 1024 * 1024:
-            raise ValueError("PDF-filen är större än 20 MiB")
+        host = urlsplit(url).hostname or ""
+        if not await asyncio.to_thread(resolves_to_public_address, host.rstrip(".")):
+            raise ValueError("PDF-källan pekar på en icke-publik adress")
+        data = await asyncio.to_thread(download_limited, url, PDF_MAX_BYTES)
         reader = PdfReader(BytesIO(data))
         if len(reader.pages) > 500:
             raise ValueError("PDF-filen innehåller fler än 500 sidor")
@@ -740,6 +798,10 @@ async def scrape_pdf_lista(context, namn, url, domain):
         for pdf_page in reader.pages:
             if remaining_chars <= 0:
                 break
+            contents = pdf_page.get_contents()
+            if contents is not None and len(contents.get_data()) > PDF_MAX_PAGE_STREAM:
+                log.warning(f"{namn}: hoppar över PDF-sida med för stor innehållsström")
+                continue
             page_text = (pdf_page.extract_text() or "")[:remaining_chars]
             text_parts.append(page_text)
             remaining_chars -= len(page_text)
