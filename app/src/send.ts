@@ -165,7 +165,8 @@ export async function maySendQueuedRecipient(
   queuedAt: number,
 ): Promise<boolean> {
   const job = await env.DB.prepare(
-    "SELECT daily_limit, next_daily_limit, limit_switch_at, status FROM send_jobs WHERE id = ?",
+    `SELECT daily_limit, next_daily_limit, limit_switch_at, status, account_id, mail_credential_id
+     FROM send_jobs WHERE id = ?`,
   )
     .bind(sendJobId)
     .first<{
@@ -173,11 +174,47 @@ export async function maySendQueuedRecipient(
       next_daily_limit: number | null;
       limit_switch_at: number | null;
       status: string;
+      account_id: string;
+      mail_credential_id: string;
     }>();
   if (!job || !["pending", "sending"].includes(job.status)) return false;
 
+  const deferRecipient = async () => {
+    await env.DB.prepare(
+      `UPDATE send_job_recipients SET status = 'pending', queued_at = NULL
+       WHERE send_job_id = ? AND recipient_email = ? AND status = 'queued' AND queued_at = ?`,
+    )
+      .bind(sendJobId, recipientEmail, queuedAt)
+      .run();
+    return false;
+  };
+
+  const account = await env.DB.prepare("SELECT daily_send_cap FROM accounts WHERE id = ?")
+    .bind(job.account_id)
+    .first<{ daily_send_cap: number }>();
+  if (!account) return deferRecipient();
+
+  const credential = await env.DB.prepare(
+    "SELECT daily_cap FROM mail_credentials WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
+  )
+    .bind(job.mail_credential_id, job.account_id)
+    .first<{ daily_cap: number | null }>();
+  if (!credential) return deferRecipient();
+
+  const reserve = async () =>
+    (await reserveSendQuota(env, {
+      sendJobId,
+      recipientEmail,
+      accountId: job.account_id,
+      mailCredentialId: job.mail_credential_id,
+      accountCap: account.daily_send_cap,
+      credentialCap: credential.daily_cap,
+    }))
+      ? true
+      : deferRecipient();
+
   const dailyLimit = effectiveJobDailyLimit(job);
-  if (dailyLimit == null) return true;
+  if (dailyLimit == null) return reserve();
 
   const startOfDay = new Date();
   startOfDay.setUTCHours(0, 0, 0, 0);
@@ -199,15 +236,81 @@ export async function maySendQueuedRecipient(
           .bind(sendJobId, available, recipientEmail)
           .first<{ allowed: number }>()
       : null;
-  if (allowed) return true;
+  if (allowed) return reserve();
 
+  return deferRecipient();
+}
+
+const RESERVATION_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Atomically hold one unit of account (and capped credential) quota for a
+ * recipient. A single INSERT ... SELECT is evaluated by SQLite as one write, so
+ * two consumers cannot both claim the last slot. Idempotent per recipient.
+ */
+async function reserveSendQuota(
+  env: Env,
+  input: {
+    sendJobId: string;
+    recipientEmail: string;
+    accountId: string;
+    mailCredentialId: string;
+    accountCap: number;
+    credentialCap: number | null;
+  },
+): Promise<boolean> {
+  const now = Date.now();
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
   await env.DB.prepare(
-    `UPDATE send_job_recipients SET status = 'pending', queued_at = NULL
-     WHERE send_job_id = ? AND recipient_email = ? AND status = 'queued' AND queued_at = ?`,
+    "DELETE FROM send_reservations WHERE expires_at <= ?",
   )
-    .bind(sendJobId, recipientEmail, queuedAt)
+    .bind(now)
     .run();
-  return false;
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO send_reservations
+       (send_job_id, recipient_email, account_id, mail_credential_id, reserved_at, expires_at)
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6
+     WHERE (
+       (SELECT COUNT(*) FROM send_log WHERE account_id = ?3 AND sent_at >= ?7 AND status = 'ok')
+       + (SELECT COUNT(*) FROM send_reservations WHERE account_id = ?3 AND expires_at > ?5)
+     ) < ?8
+     AND (?9 IS NULL OR (
+       (SELECT COUNT(*) FROM send_log sl JOIN send_jobs sj ON sj.id = sl.send_job_id
+         WHERE sj.mail_credential_id = ?4 AND sl.sent_at >= ?7 AND sl.status = 'ok')
+       + (SELECT COUNT(*) FROM send_reservations WHERE mail_credential_id = ?4 AND expires_at > ?5)
+     ) < ?9)`,
+  )
+    .bind(
+      input.sendJobId,
+      input.recipientEmail,
+      input.accountId,
+      input.mailCredentialId,
+      now,
+      now + RESERVATION_TTL_MS,
+      startOfDay.getTime(),
+      input.accountCap,
+      input.credentialCap,
+    )
+    .run();
+  const held = await env.DB.prepare(
+    "SELECT 1 AS held FROM send_reservations WHERE send_job_id = ? AND recipient_email = ? AND expires_at > ?",
+  )
+    .bind(input.sendJobId, input.recipientEmail, now)
+    .first<{ held: number }>();
+  return Boolean(held);
+}
+
+export async function releaseSendReservation(
+  env: Env,
+  sendJobId: string,
+  recipientEmail: string,
+): Promise<void> {
+  await env.DB.prepare(
+    "DELETE FROM send_reservations WHERE send_job_id = ? AND recipient_email = ?",
+  )
+    .bind(sendJobId, recipientEmail)
+    .run();
 }
 
 async function remainingQuotaForCredential(
@@ -223,44 +326,74 @@ async function remainingQuotaForCredential(
   const credential = await getMailCredential(env.DB, mailCredentialId);
   if (!credential || credential.account_id !== accountId) throw new Error("Mailkoppling saknas");
 
-  if (credential.daily_cap != null) {
-    const sentViaCredentialToday = await countSentTodayForCredential(env.DB, mailCredentialId);
-    const queuedViaCredential = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM send_job_recipients r
-       JOIN send_jobs j ON j.id = r.send_job_id
-       WHERE j.mail_credential_id = ? AND r.status = 'queued'`,
-    )
-      .bind(mailCredentialId)
-      .first<{ n: number }>();
-    return {
-      remaining: Math.max(
-        0,
-        Number(credential.daily_cap) - sentViaCredentialToday - (queuedViaCredential?.n ?? 0),
-      ),
-      label: `dygnsgränsen för detta mailkonto (${credential.daily_cap}/dygn)`,
-    };
-  }
-
-  const sentToday = await countSentToday(env.DB, accountId);
-  const queued = await env.DB.prepare(
+  const accountSentToday = await countSentToday(env.DB, accountId);
+  const accountQueued = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM send_job_recipients r
      JOIN send_jobs j ON j.id = r.send_job_id
-     WHERE j.account_id = ? AND r.status = 'queued'`,
+     WHERE j.account_id = ? AND r.status = 'queued'
+       AND j.status IN ('pending', 'sending')`,
   )
     .bind(accountId)
     .first<{ n: number }>();
+  // Sends still in flight for jobs that are no longer active (aborted or
+  // cancelled mid-send) keep their reserved capacity until they are logged.
+  const accountInFlight = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM send_reservations r
+     WHERE r.account_id = ? AND r.expires_at > ?
+       AND NOT EXISTS (SELECT 1 FROM send_jobs j WHERE j.id = r.send_job_id AND j.status IN ('pending', 'sending'))`,
+  )
+    .bind(accountId, Date.now())
+    .first<{ n: number }>();
+  const accountRemaining = Math.max(
+    0,
+    account.daily_send_cap - accountSentToday - (accountQueued?.n ?? 0) - (accountInFlight?.n ?? 0),
+  );
+
+  if (credential.daily_cap == null) {
+    return {
+      remaining: accountRemaining,
+      label: `kontots dygnsgräns (${account.daily_send_cap}/dygn)`,
+    };
+  }
+
+  const sentViaCredentialToday = await countSentTodayForCredential(env.DB, mailCredentialId);
+  const queuedViaCredential = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM send_job_recipients r
+     JOIN send_jobs j ON j.id = r.send_job_id
+     WHERE j.mail_credential_id = ? AND r.status = 'queued'
+       AND j.status IN ('pending', 'sending')`,
+  )
+    .bind(mailCredentialId)
+    .first<{ n: number }>();
+  const credentialInFlight = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM send_reservations r
+     WHERE r.mail_credential_id = ? AND r.expires_at > ?
+       AND NOT EXISTS (SELECT 1 FROM send_jobs j WHERE j.id = r.send_job_id AND j.status IN ('pending', 'sending'))`,
+  )
+    .bind(mailCredentialId, Date.now())
+    .first<{ n: number }>();
+  const credentialRemaining = Math.max(
+    0,
+    Number(credential.daily_cap) -
+      sentViaCredentialToday -
+      (queuedViaCredential?.n ?? 0) -
+      (credentialInFlight?.n ?? 0),
+  );
   return {
-    remaining: Math.max(0, account.daily_send_cap - sentToday - (queued?.n ?? 0)),
-    label: `kontots dygnsgräns (${account.daily_send_cap}/dygn)`,
+    remaining: Math.min(accountRemaining, credentialRemaining),
+    label:
+      accountRemaining <= credentialRemaining
+        ? `kontots dygnsgräns (${account.daily_send_cap}/dygn)`
+        : `dygnsgränsen för detta mailkonto (${credential.daily_cap}/dygn)`,
   };
 }
 
-async function stageRecipients(
+function stageRecipientStatements(
   env: Env,
   sendJobId: string,
   recipients: StagedRecipient[],
   subject?: string,
-): Promise<void> {
+): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   for (let i = 0; i < recipients.length; i += STAGE_CHUNK_SIZE) {
     const chunk = recipients.slice(i, i + STAGE_CHUNK_SIZE);
@@ -273,7 +406,7 @@ async function stageRecipients(
       ).bind(sendJobId, subject ?? null, JSON.stringify(chunk)),
     );
   }
-  if (statements.length > 0) await env.DB.batch(statements);
+  return statements;
 }
 
 export async function enqueuePendingRecipientsForJob(
@@ -478,13 +611,13 @@ export async function createAndEnqueueSendJob(
   const rate = parseRateInput(input);
   const introText = normalizeSelectedLetterIntroText(input.introText);
   const storedIntroText = introText ? await encryptLetterData(env, introText) : null;
-  await env.DB.prepare(
-    `INSERT INTO send_jobs
-       (id, account_id, letter_id, mail_credential_id, total_recipients, status,
-        daily_limit, next_daily_limit, limit_switch_at, intro_text, created_at)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
-  )
-    .bind(
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO send_jobs
+         (id, account_id, letter_id, mail_credential_id, total_recipients, status,
+          daily_limit, next_daily_limit, limit_switch_at, intro_text, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+    ).bind(
       sendJobId,
       accountId,
       input.letterId,
@@ -495,10 +628,9 @@ export async function createAndEnqueueSendJob(
       rate.limitSwitchAt,
       storedIntroText,
       Date.now(),
-    )
-    .run();
-
-  await stageRecipients(env, sendJobId, orderedRecipients, input.subject);
+    ),
+    ...stageRecipientStatements(env, sendJobId, orderedRecipients, input.subject),
+  ]);
   const quota = await remainingQuotaForCredential(env, accountId, input.mailCredentialId);
   await enqueueWithinLimits(env, sendJobId, quota.remaining);
   return { sendJobId, totalRecipients: recipients.length };
