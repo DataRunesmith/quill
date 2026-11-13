@@ -18,6 +18,7 @@ import {
   deleteAccount,
   type Env,
 } from "./db";
+import { clearAttempts, enforceAttemptLimit } from "./rate-limit";
 import { loginDiagnosticEvent } from "./login-diagnostic";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 dagar
