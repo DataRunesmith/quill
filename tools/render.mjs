@@ -78,6 +78,11 @@ const overlay = overlayArg ? canonical(overlayArg) : "";
 const overlayRoot = overlay ? rootOf(overlay) : outRoot;
 if (overlay && (!overlayRoot || overlay === overlayRoot || !overlay.startsWith(overlayRoot + sep)))
   throw new Error(`Overlay directory ${outsideMessage}`);
+// Likewise refuse an output path that is itself a symbolic link, which
+// canonical() would otherwise resolve to (and then replace) its target.
+const outLink = join(canonical(dirname(resolve(outArg))), basename(resolve(outArg)));
+if (!outLink.startsWith(outRoot + sep) || (existsSync(outLink) && lstatSync(outLink).isSymbolicLink()))
+  throw new Error("Refusing to replace a symbolic-link output path.");
 // canonical() follows a symbolic link in the last component, so look at that
 // component itself (inside its canonical parent) to refuse a linked overlay.
 const overlayLink = overlay ? join(canonical(dirname(resolve(overlayArg))), basename(resolve(overlayArg))) : "";
