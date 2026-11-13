@@ -151,7 +151,7 @@ function renderAccountSettings() {
   $("#delete-account").onclick = () => {
     showModal(
       "Radera konto",
-      `<form id="delete-form" class="stack"><div class="notice notice--warning">Detta går inte att ångra.</div><div class="field"><label>Lösenord</label><input class="input" name="password" type="password" autocomplete="current-password" required></div>${state.me.totpEnabled ? '<div class="field"><label>2FA-kod</label><input class="input" name="totpCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required></div>' : ""}<button class="button button--danger" type="submit">Radera permanent</button></form>`,
+      `<form id="delete-form" class="stack"><div class="notice notice--warning">Detta går inte att ångra.</div>${state.me.passwordSetByUser ? '<div class="field"><label>Lösenord</label><input class="input" name="password" type="password" autocomplete="current-password" required></div>' : ""}${state.me.totpEnabled ? '<div class="field"><label>2FA-kod</label><input class="input" name="totpCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required></div>' : ""}<button class="button button--danger" type="submit">Radera permanent</button></form>`,
     );
     $("#delete-form").onsubmit = async (e) => {
       e.preventDefault();
@@ -210,6 +210,25 @@ async function renderSecuritySettings() {
       host.append(d);
     }
     if (!ids.length) host.innerHTML = '<div class="empty">Inga externa inloggningar länkade.</div>';
+    const linkActions = document.createElement("div");
+    linkActions.className = "row";
+    for (const provider of ["google", "microsoft"]) {
+      if (ids.some((identity) => identity.provider === provider)) continue;
+      const button = document.createElement("button");
+      button.className = "button button--secondary";
+      button.textContent = `Koppla ${providerName(provider)}`;
+      button.onclick = async () => {
+        try {
+          const result = await api(`/api/oauth-link/${provider}/start`, { method: "POST" });
+          if (typeof result.authorizeUrl !== "string") throw new Error("Saknar inloggningsadress");
+          location.href = result.authorizeUrl;
+        } catch (err) {
+          notice(err.message, "error");
+        }
+      };
+      linkActions.append(button);
+    }
+    if (linkActions.childElementCount) host.append(linkActions);
   } catch (err) {
     $("#oauth-list").innerHTML = `<div class="notice notice--error">${esc(err.message)}</div>`;
   }
