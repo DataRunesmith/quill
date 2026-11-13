@@ -24,7 +24,9 @@ test("only the production custom domain is exposed", () => {
   assert.equal(wrangler.previews, undefined);
 });
 
-test("Docker bootstrap never verifies an unverified admin email", () => {
-  assert.match(containerEntry, /WHERE lower\(trim\(email\)\) = \? AND email_verified = 1 AND is_admin = 0/);
+test("Docker bootstrap never adopts or elevates an existing account", () => {
+  assert.match(containerEntry, /existing-account-requires-manual-review/);
+  assert.match(containerEntry, /INSERT OR IGNORE INTO accounts/);
+  assert.doesNotMatch(containerEntry, /UPDATE accounts/);
   assert.doesNotMatch(containerEntry, /SET is_admin = 1, email_verified = 1/);
 });

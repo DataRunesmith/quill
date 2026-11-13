@@ -59,7 +59,7 @@ test("account deletion requires a fresh web session and cookie mutations fail cl
   assert.ok(secureIndexSource.includes('"/api/delete-account"'));
   assertSourceMatch(authSource, /if \(account\.password_set_by_user \|\| account\.totp_enabled\) \{\s*await reauthenticateAccount\(env, accountId, password, totpCode\)/);
   assertSourceMatch(secureIndexSource, /return req\.headers\.get\("Origin"\) !== url\.origin/);
-  assertSourceMatch(secureIndexSource, /requestBodyExceedsLimit\(req, MAX_SEND_REQUEST_BYTES\)/);
+  assertSourceMatch(secureIndexSource, /requestBodyExceedsLimit\(req, requestBodyLimit\(url\.pathname\)\)/);
 });
 
 test("authentication attempt limits are atomic and fail closed through Durable Objects", () => {

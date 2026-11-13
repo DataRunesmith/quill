@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { webcrypto } from "node:crypto";
-import type { Env } from "../src/db";
-import { decryptLetterData, encryptLetterData } from "../src/letter-privacy";
+import type { Env } from "../src/db.ts";
+import { decryptLetterData, encryptLetterData } from "../src/letter-privacy.ts";
 
 if (!globalThis.crypto) Object.defineProperty(globalThis, "crypto", { value: webcrypto });
 

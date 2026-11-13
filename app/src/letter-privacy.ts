@@ -1,4 +1,4 @@
-import { decryptSecret, encryptSecret } from "../../shared/crypto";
+import { decryptSecret, encryptSecret } from "../../shared/crypto.ts";
 import type { Env } from "./db";
 
 const PREFIX = "enc:v1:";
