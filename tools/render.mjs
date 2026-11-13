@@ -29,7 +29,7 @@ import {
   symlinkSync,
   writeSync,
 } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -39,19 +39,44 @@ if (!valuesFile || !outArg) {
   process.exit(2);
 }
 const source = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
-// Output and overlay paths must stay under the repo, the working directory,
-// the system temp directory or /srv (the container's site directory), so a
-// mistyped argument cannot make this script write or delete elsewhere.
-const allowedRoots = [source, process.cwd(), realpathSync(tmpdir()), "/srv"].map((root) =>
-  root.endsWith(sep) ? root : root + sep,
-);
-const requestedOut = resolve(outArg);
-if (!allowedRoots.some((root) => `${requestedOut}${sep}`.startsWith(root)))
+// Output and overlay paths must stay strictly beneath the repo, the working
+// directory, the system temp directory or /srv (the container's site
+// directory), so a mistyped argument cannot make this script write, copy or
+// delete elsewhere. A filesystem root is never an allowed root.
+const rootDir = (path) => parse(path).root;
+const tryRealpath = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+};
+const allowedRoots = [source, process.cwd(), tmpdir(), "/srv"]
+  .map(tryRealpath)
+  .filter((root) => root && root !== rootDir(root));
+// Resolves symbolic links in the deepest existing ancestor, so the check
+// below sees where a path really ends up before anything is created.
+const canonical = (path) => {
+  const absolute = resolve(path);
+  let existing = absolute;
+  const rest = [];
+  while (!tryRealpath(existing) && dirname(existing) !== existing) {
+    rest.unshift(basename(existing));
+    existing = dirname(existing);
+  }
+  return join(tryRealpath(existing) ?? existing, ...rest);
+};
+const strictlyInside = (path) =>
+  allowedRoots.some((root) => path !== root && path.startsWith(root + sep));
+const out = canonical(outArg);
+if (!strictlyInside(out))
   throw new Error("Output path must be inside the repo, the working directory, the temp directory or /srv.");
-mkdirSync(dirname(requestedOut), { recursive: true });
-const out = resolve(realpathSync(dirname(requestedOut)), basename(requestedOut));
-if (!allowedRoots.some((root) => `${out}${sep}`.startsWith(root)))
-  throw new Error("Output path resolves outside the allowed directories.");
+const overlay = overlayArg ? canonical(overlayArg) : "";
+if (overlay && !strictlyInside(overlay))
+  throw new Error("Overlay directory must be inside the repo, the working directory, the temp directory or /srv.");
+if (overlay && existsSync(overlay) && lstatSync(resolve(overlayArg)).isSymbolicLink())
+  throw new Error("Overlay directory cannot be a symbolic link.");
+mkdirSync(dirname(out), { recursive: true });
 let outInfo;
 try {
   outInfo = lstatSync(out);
@@ -157,12 +182,7 @@ for (const name of readdirSync(source)) {
       filter: (candidate) => keep(candidate) && !lstatSync(candidate).isSymbolicLink(),
     });
 }
-const overlay = overlayArg ? resolve(overlayArg) : "";
-if (overlay && !allowedRoots.some((root) => `${overlay}${sep}`.startsWith(root)))
-  throw new Error("Overlay directory must be inside the repo, the working directory, the temp directory or /srv.");
 if (overlay && existsSync(overlay)) {
-  if (lstatSync(overlay).isSymbolicLink())
-    throw new Error("Overlay directory cannot be a symbolic link.");
   cpSync(overlay, out, {
     recursive: true,
     filter: (candidate) => !lstatSync(candidate).isSymbolicLink(),
