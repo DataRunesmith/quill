@@ -74,10 +74,6 @@ const out = canonical(outArg);
 const outRoot = rootOf(out);
 if (!outRoot || out === outRoot || !out.startsWith(outRoot + sep))
   throw new Error(`Output path ${outsideMessage}`);
-const overlay = overlayArg ? canonical(overlayArg) : "";
-const overlayRoot = overlay ? rootOf(overlay) : outRoot;
-if (overlay && (!overlayRoot || overlay === overlayRoot || !overlay.startsWith(overlayRoot + sep)))
-  throw new Error(`Overlay directory ${outsideMessage}`);
 // lstat (not existsSync) so a dangling symbolic link is still seen as one.
 const isLink = (path) => {
   try {
@@ -91,13 +87,19 @@ const isLink = (path) => {
 const outLink = join(canonical(dirname(resolve(outArg))), basename(resolve(outArg)));
 if (!outLink.startsWith(outRoot + sep) || isLink(outLink))
   throw new Error("Refusing to replace a symbolic-link output path.");
-// canonical() follows a symbolic link in the last component, so look at that
-// component itself (inside its canonical parent) to refuse a linked overlay.
-const overlayLink = overlay ? join(canonical(dirname(resolve(overlayArg))), basename(resolve(overlayArg))) : "";
-if (overlayLink && (!overlayLink.startsWith(overlayRoot + sep) || isLink(overlayLink)))
-  throw new Error("Overlay directory cannot be a symbolic link.");
-// A named overlay that does not exist is a mistake, not "no overlay".
-if (overlay && !existsSync(overlay)) throw new Error("Overlay directory does not exist.");
+if (overlayArg) {
+  const checked = canonical(overlayArg);
+  const checkedRoot = rootOf(checked);
+  if (!checkedRoot || checked === checkedRoot || !checked.startsWith(checkedRoot + sep))
+    throw new Error(`Overlay directory ${outsideMessage}`);
+  // canonical() follows a symbolic link in the last component, so look at that
+  // component itself (inside its canonical parent) to refuse a linked overlay.
+  const link = join(canonical(dirname(resolve(overlayArg))), basename(resolve(overlayArg)));
+  if (!link.startsWith(checkedRoot + sep) || isLink(link))
+    throw new Error("Overlay directory cannot be a symbolic link.");
+  // A named overlay that does not exist is a mistake, not "no overlay".
+  if (!existsSync(checked)) throw new Error("Overlay directory does not exist.");
+}
 mkdirSync(dirname(out), { recursive: true });
 let outInfo;
 try {
@@ -204,7 +206,11 @@ for (const name of readdirSync(source)) {
       filter: (candidate) => keep(candidate) && !lstatSync(candidate).isSymbolicLink(),
     });
 }
-if (overlay && existsSync(overlay)) {
+if (overlayArg) {
+  const overlay = canonical(overlayArg);
+  const overlayRoot = rootOf(overlay);
+  if (!overlayRoot || overlay === overlayRoot || !overlay.startsWith(overlayRoot + sep))
+    throw new Error(`Overlay directory ${outsideMessage}`);
   cpSync(overlay, out, {
     recursive: true,
     filter: (candidate) => !lstatSync(candidate).isSymbolicLink(),
