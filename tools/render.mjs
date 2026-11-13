@@ -66,15 +66,22 @@ const canonical = (path) => {
   }
   return join(tryRealpath(existing) ?? existing, ...rest);
 };
-const strictlyInside = (path) =>
-  allowedRoots.some((root) => path !== root && path.startsWith(root + sep));
+const rootOf = (path) => allowedRoots.find((root) => path !== root && path.startsWith(root + sep));
+const outsideMessage = "must be inside the repo, the working directory, the temp directory or /srv.";
+// Each path is checked inline against the allowed root it falls under, right
+// where it is canonicalized, so nothing is created, copied or removed first.
 const out = canonical(outArg);
-if (!strictlyInside(out))
-  throw new Error("Output path must be inside the repo, the working directory, the temp directory or /srv.");
+const outRoot = rootOf(out);
+if (!outRoot || out === outRoot || !out.startsWith(outRoot + sep))
+  throw new Error(`Output path ${outsideMessage}`);
 const overlay = overlayArg ? canonical(overlayArg) : "";
-if (overlay && !strictlyInside(overlay))
-  throw new Error("Overlay directory must be inside the repo, the working directory, the temp directory or /srv.");
-if (overlay && existsSync(overlay) && lstatSync(resolve(overlayArg)).isSymbolicLink())
+const overlayRoot = overlay ? rootOf(overlay) : outRoot;
+if (overlay && (!overlayRoot || overlay === overlayRoot || !overlay.startsWith(overlayRoot + sep)))
+  throw new Error(`Overlay directory ${outsideMessage}`);
+// canonical() follows a symbolic link in the last component, so look at that
+// component itself (inside its canonical parent) to refuse a linked overlay.
+const overlayLink = overlay ? join(canonical(dirname(resolve(overlayArg))), basename(resolve(overlayArg))) : "";
+if (overlayLink && (!overlayLink.startsWith(overlayRoot + sep) || (existsSync(overlayLink) && lstatSync(overlayLink).isSymbolicLink())))
   throw new Error("Overlay directory cannot be a symbolic link.");
 mkdirSync(dirname(out), { recursive: true });
 let outInfo;
