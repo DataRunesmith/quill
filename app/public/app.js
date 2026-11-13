@@ -624,7 +624,7 @@ function renderReset(token) {
   resetShellForAuth();
   renderNav();
   $("#root").innerHTML =
-    `<div class="page page--narrow reset-page"><section class="card"><div class="card__eyebrow">Kontosäkerhet</div><h1>Sätt nytt lösenord</h1><p class="muted">Efter en lyckad återställning stängs 2FA av och kan aktiveras igen under Säkerhet.</p><form id="reset-form" class="stack"><div class="field"><label>Nytt lösenord</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="field"><label>Bekräfta lösenord</label><input class="input" name="password2" type="password" minlength="10" autocomplete="new-password" required></div><button class="button button--primary" type="submit">Spara nytt lösenord</button></form><div id="reset-msg" class="section"></div></section></div>`;
+    `<div class="page page--narrow reset-page"><section class="card"><div class="card__eyebrow">Kontosäkerhet</div><h1>Sätt nytt lösenord</h1><p class="muted">Tvåfaktorsautentisering förblir aktiv efter lösenordsåterställningen. Använd din befintliga autentiseringsapp vid nästa inloggning.</p><form id="reset-form" class="stack"><div class="field"><label>Nytt lösenord</label><input class="input" name="password" type="password" minlength="10" autocomplete="new-password" required></div><div class="field"><label>Bekräfta lösenord</label><input class="input" name="password2" type="password" minlength="10" autocomplete="new-password" required></div><button class="button button--primary" type="submit">Spara nytt lösenord</button></form><div id="reset-msg" class="section"></div></section></div>`;
   $("#reset-form").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);

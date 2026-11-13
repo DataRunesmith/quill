@@ -1,7 +1,6 @@
 #!/bin/sh
 # Builds the documentation site into <assets-dir>/docs, so the app's own Worker
-# serves it under /docs. Workers Builds runs it after rendering:
-#   node tools/render.mjs - build && sh tools/docs-cloudflare.sh <assets-dir>
+# serves it under /docs. tools/deploy.sh runs it in the rendered copy.
 # If <assets-dir>/_headers exists, a /docs/* rule replaces the app's CSP there
 # with one that allows the site's inline scripts by hash and the inline styles
 # its scripts set. The GitHub widget gets no repo stats, since connect-src

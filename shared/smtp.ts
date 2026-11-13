@@ -17,7 +17,8 @@ export interface SmtpConfig {
   fromAddress: string;
 }
 
-export class SmtpError extends Error {}
+import { SmtpError, SmtpTransportError } from "./smtp-failure";
+export { SmtpError, SmtpTransportError };
 
 interface SmtpResponse {
   code: number;
@@ -40,31 +41,50 @@ async function openConnection(host: string, port: number): Promise<Connection> {
   const read = () => readSmtpResponse(reader);
   const write = (line: string) => writer.write(new TextEncoder().encode(line + "\r\n"));
 
-  await expect(await read(), 220, "Servern svarade inte med 220 vid anslutning");
-  await write("EHLO __PUBLIC_HOST__");
-  await read();
-
-  if (!useDirectTls) {
-    await write("STARTTLS");
-    await expect(await read(), 220, "STARTTLS nekades av servern");
-    writer.releaseLock();
-    reader.releaseLock();
-    socket = await socket.startTls();
-    writer = socket.writable.getWriter();
-    reader = socket.readable.getReader();
+  try {
+    await expect(await read(), 220, "Servern svarade inte med 220 vid anslutning");
     await write("EHLO __PUBLIC_HOST__");
-    await read();
-  }
+    await expect(await read(), 250, "Servern accepterade inte EHLO");
 
-  const quit = async () => {
-    try {
-      await write("QUIT");
-    } catch {}
+    if (!useDirectTls) {
+      await write("STARTTLS");
+      await expect(await read(), 220, "STARTTLS nekades av servern");
+      writer.releaseLock();
+      reader.releaseLock();
+      socket = await socket.startTls();
+      writer = socket.writable.getWriter();
+      reader = socket.readable.getReader();
+      await write("EHLO __PUBLIC_HOST__");
+      await expect(await read(), 250, "Servern accepterade inte EHLO efter STARTTLS");
+    }
+
+    const quit = async () => {
+      try {
+        await write("QUIT");
+      } catch {}
+      try {
+        writer.releaseLock();
+      } catch {}
+      try {
+        reader.releaseLock();
+      } catch {}
+      try {
+        await socket.close();
+      } catch {}
+    };
+    return { write, read, quit };
+  } catch (error) {
     try {
       writer.releaseLock();
     } catch {}
-  };
-  return { write, read, quit };
+    try {
+      reader.releaseLock();
+    } catch {}
+    try {
+      await socket.close();
+    } catch {}
+    throw error;
+  }
 }
 
 async function authenticate(conn: Connection, config: SmtpConfig): Promise<void> {
@@ -105,7 +125,7 @@ export async function sendSmtpMail(
     await conn.write("DATA");
     await expect(await conn.read(), 354, "Servern accepterade inte DATA");
     const message = buildMimeMessage(from, to, opts.subject, opts.html, opts.attachments ?? []);
-    const stuffed = message.replace(/\r?\n\./g, "\n..");
+    const stuffed = message.replace(/\r?\n\./g, "\r\n..");
     await conn.write(`${stuffed}\r\n.`);
     await expect(await conn.read(), 250, "Mejlet accepterades inte av servern");
   } finally {
@@ -176,17 +196,51 @@ async function readSmtpResponse(
   reader: ReadableStreamDefaultReader<Uint8Array>,
 ): Promise<SmtpResponse> {
   let buffer = "";
+  const lines: string[] = [];
+  let responseCode: number | null = null;
+  let totalBytes = 0;
+  const deadline = Date.now() + 15_000;
   const decoder = new TextDecoder();
+
   while (true) {
-    const { value, done } = await reader.read();
-    if (done) throw new SmtpError("Anslutningen stängdes oväntat");
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\r\n").filter(Boolean);
-    const last = lines[lines.length - 1];
-    if (last && /^\d{3} /.test(last))
-      return { code: parseInt(last.slice(0, 3), 10), text: lines.join("\n") };
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new SmtpTransportError("SMTP-servern svarade inte i tid");
+    const chunk = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new SmtpTransportError("SMTP-servern svarade inte i tid")), remainingMs);
+      reader.read().then(
+        (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+    if (chunk.done) throw new SmtpTransportError("Anslutningen stängdes oväntat");
+    totalBytes += chunk.value.byteLength;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    if (buffer.length > 65_536 || totalBytes > 65_536) throw new SmtpError("SMTP-serverns svar är för stort");
+
+    let lineEnd = buffer.indexOf("\r\n");
+    while (lineEnd !== -1) {
+      const line = buffer.slice(0, lineEnd);
+      buffer = buffer.slice(lineEnd + 2);
+      if (!line) throw new SmtpError("SMTP-servern skickade en ogiltig svarrad");
+      const match = line.match(/^(\d{3})([ -])/);
+      if (!match) throw new SmtpError("SMTP-servern skickade ett ogiltigt svar");
+      const code = Number(match[1]);
+      if (responseCode === null) responseCode = code;
+      else if (responseCode !== code)
+        throw new SmtpError("SMTP-servern ändrade svarskod mitt i ett flerradssvar");
+      lines.push(line);
+      if (match[2] === " ") return { code, text: lines.join("\n") };
+      lineEnd = buffer.indexOf("\r\n");
+    }
   }
 }
+
 async function expect(
   resp: SmtpResponse,
   expectedCode: number,

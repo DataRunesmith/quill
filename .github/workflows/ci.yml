@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: app
+      - run: npm run validate
+        working-directory: app
+      - run: sh tools/deploy.sh cloudflare.example.env --dry-run
+      - run: node --test tools/*.test.mjs
+      - run: node tools/check-addresses.mjs
+
+  kontakter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kontakter
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements-dev.txt requests pypdf dnspython playwright
+      - run: python -m pytest -q

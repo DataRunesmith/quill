@@ -31,7 +31,7 @@ export interface Env {
 }
 
 export async function getAccountByEmail(db: D1Database, email: string) {
-  return db.prepare("SELECT * FROM accounts WHERE email = ?").bind(email).first();
+  return db.prepare("SELECT * FROM accounts WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))").bind(email).first();
 }
 export async function getAccountById(db: D1Database, id: string) {
   return db.prepare("SELECT * FROM accounts WHERE id = ?").bind(id).first();
@@ -48,15 +48,51 @@ export async function deleteAccount(env: Env, accountId: string): Promise<void> 
     if ((row?.n ?? 0) <= 1)
       throw new Error("Kan inte radera det sista admin-kontot — utse en annan administratör först");
   }
+  // Durable deletion state first: from here the account cannot log in or send,
+  // and a failed cleanup below is resumed by resumePendingAccountDeletions.
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE accounts SET disabled = 1, security_version = security_version + 1,
+         deletion_requested_at = COALESCE(deletion_requested_at, ?) WHERE id = ?`,
+    ).bind(Date.now(), accountId),
+    env.DB.prepare(
+      "UPDATE send_jobs SET status = 'aborted' WHERE account_id = ? AND status IN ('pending', 'sending')",
+    ).bind(accountId),
+  ]);
+  await purgeAccountData(env, accountId);
+}
+
+/** Retry cleanup for accounts whose deletion started but did not finish. */
+export async function resumePendingAccountDeletions(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM accounts WHERE deletion_requested_at IS NOT NULL LIMIT 10",
+  ).all<{ id: string }>();
+  for (const row of results) {
+    try {
+      await purgeAccountData(env, row.id);
+    } catch (error) {
+      console.error("Account deletion cleanup failed", row.id, error);
+    }
+  }
+}
+
+async function purgeAccountData(env: Env, accountId: string): Promise<void> {
   const { results: attachmentRows } = await env.DB.prepare(
     "SELECT r2_key FROM letter_attachments WHERE letter_id IN (SELECT id FROM letters WHERE account_id = ?)",
   )
     .bind(accountId)
     .all<{ r2_key: string }>();
+  // Keep the attachment references until R2 confirms deletion. Swallowing an
+  // R2 failure after deleting the rows would orphan private files permanently.
+  for (let offset = 0; offset < attachmentRows.length; offset += 1000) {
+    const keys = attachmentRows.slice(offset, offset + 1000).map((row) => row.r2_key);
+    await env.ATTACHMENTS.delete(keys);
+  }
   await env.DB.batch([
     env.DB.prepare(
       "DELETE FROM letter_attachments WHERE letter_id IN (SELECT id FROM letters WHERE account_id = ?)",
     ).bind(accountId),
+    env.DB.prepare("DELETE FROM send_reservations WHERE account_id = ?").bind(accountId),
     env.DB.prepare("DELETE FROM send_log WHERE account_id = ?").bind(accountId),
     env.DB.prepare("DELETE FROM send_jobs WHERE account_id = ?").bind(accountId),
     env.DB.prepare("DELETE FROM letters WHERE account_id = ?").bind(accountId),
@@ -73,11 +109,6 @@ export async function deleteAccount(env: Env, accountId: string): Promise<void> 
     ),
     env.DB.prepare("DELETE FROM accounts WHERE id = ?").bind(accountId),
   ]);
-  if (attachmentRows.length) {
-    try {
-      await env.ATTACHMENTS.delete(attachmentRows.map((r) => r.r2_key));
-    } catch {}
-  }
 }
 
 export async function createAccount(
