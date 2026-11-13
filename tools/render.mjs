@@ -30,6 +30,7 @@ import {
   writeSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const [valuesFile, outArg, overlayArg] = process.argv.slice(2);
@@ -38,9 +39,19 @@ if (!valuesFile || !outArg) {
   process.exit(2);
 }
 const source = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
+// Output and overlay paths must stay under the repo, the working directory,
+// the system temp directory or /srv (the container's site directory), so a
+// mistyped argument cannot make this script write or delete elsewhere.
+const allowedRoots = [source, process.cwd(), realpathSync(tmpdir()), "/srv"].map((root) =>
+  root.endsWith(sep) ? root : root + sep,
+);
 const requestedOut = resolve(outArg);
+if (!allowedRoots.some((root) => `${requestedOut}${sep}`.startsWith(root)))
+  throw new Error("Output path must be inside the repo, the working directory, the temp directory or /srv.");
 mkdirSync(dirname(requestedOut), { recursive: true });
 const out = resolve(realpathSync(dirname(requestedOut)), basename(requestedOut));
+if (!allowedRoots.some((root) => `${out}${sep}`.startsWith(root)))
+  throw new Error("Output path resolves outside the allowed directories.");
 let outInfo;
 try {
   outInfo = lstatSync(out);
@@ -146,10 +157,13 @@ for (const name of readdirSync(source)) {
       filter: (candidate) => keep(candidate) && !lstatSync(candidate).isSymbolicLink(),
     });
 }
-if (overlayArg && existsSync(overlayArg)) {
-  if (lstatSync(overlayArg).isSymbolicLink())
+const overlay = overlayArg ? resolve(overlayArg) : "";
+if (overlay && !allowedRoots.some((root) => `${overlay}${sep}`.startsWith(root)))
+  throw new Error("Overlay directory must be inside the repo, the working directory, the temp directory or /srv.");
+if (overlay && existsSync(overlay)) {
+  if (lstatSync(overlay).isSymbolicLink())
     throw new Error("Overlay directory cannot be a symbolic link.");
-  cpSync(overlayArg, out, {
+  cpSync(overlay, out, {
     recursive: true,
     filter: (candidate) => !lstatSync(candidate).isSymbolicLink(),
   });
