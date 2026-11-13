@@ -1,8 +1,17 @@
 // `wrangler dev` does not fire cron triggers by itself. This calls the
 // Worker's scheduled handler once a minute, like the production cron
 // "* * * * *" (it re-queues pending sends and promotes ADMIN_EMAIL).
-const port = process.env.PORT || "8787";
-const url = `http://127.0.0.1:${port}/cdn-cgi/handler/scheduled?cron=${encodeURIComponent("* * * * *")}`;
+// The port only ever selects a loopback port; reject anything but a plain
+// port number so the environment cannot steer the request elsewhere.
+const rawPort = process.env.PORT || "8787";
+const port = /^\d{1,5}$/.test(rawPort) ? Number(rawPort) : 0;
+if (port < 1 || port > 65535) {
+  console.error(`[scheduler] invalid PORT: ${JSON.stringify(rawPort)}`);
+  process.exit(1);
+}
+const url = new URL("http://127.0.0.1/cdn-cgi/handler/scheduled");
+url.port = String(port);
+url.searchParams.set("cron", "* * * * *");
 
 async function tick() {
   try {
