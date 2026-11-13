@@ -10,13 +10,16 @@ Sparar resultat som VCF-filer (en per region + en samlad).
 
 import asyncio
 import csv
+import ipaddress
 import logging
 import os
 import re
 import sys
+import socket
 import unicodedata
+import requests
 from io import BytesIO
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 from playwright.async_api import async_playwright, Error as PlaywrightError
 from pypdf import PdfReader
 
@@ -55,6 +58,99 @@ def is_valid_email(email: str) -> bool:
     if not EMAIL_RE.fullmatch(email):
         return False
     return not any(kw in email for kw in SKIP_KEYWORDS)
+
+
+def is_safe_network_url(url: str) -> bool:
+    """Block non-web schemes and private/local destinations before Chromium fetches them."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return False
+        if parsed.username is not None or parsed.password is not None:
+            return False
+        host = parsed.hostname.rstrip(".").lower()
+        if host in {"localhost", "metadata", "metadata.google.internal", "host.docker.internal"}:
+            return False
+        if host.endswith((".localhost", ".local", ".internal", ".cluster.local", ".svc", ".test", ".invalid")):
+            return False
+        try:
+            port = parsed.port
+        except ValueError:
+            return False
+        if port is not None and port not in {80, 443}:
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            try:
+                # inet_aton also recognizes legacy decimal/octal/hex IPv4 forms.
+                address = ipaddress.ip_address(socket.inet_aton(host))
+            except OSError:
+                address = None
+        if address is not None:
+            return address.is_global
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def resolves_to_public_address(host: str) -> bool:
+    """Reject public-looking names whose DNS answer points at a private address."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    addresses = {info[4][0] for info in infos}
+    if not addresses:
+        return False
+    try:
+        return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
+    except ValueError:
+        return False
+
+
+def trusted_profile_hosts(source_url: str) -> set[str]:
+    parsed = urlsplit(source_url)
+    if parsed.scheme != "https" or not parsed.hostname or not is_safe_network_url(source_url):
+        raise ValueError(f"Unsafe source URL: {source_url}")
+    host = parsed.hostname.rstrip(".").lower()
+    base = host[4:] if host.startswith("www.") else host
+    return {base, f"www.{base}"}
+
+
+def is_trusted_profile_url(url: str, allowed_hosts: set[str]) -> bool:
+    if not is_safe_network_url(url) or urlsplit(url).scheme != "https":
+        return False
+    host = urlsplit(url).hostname
+    return bool(host and host.rstrip(".").lower() in allowed_hosts)
+
+
+async def block_private_network_requests(route, request):
+    url = request.url
+    if not is_safe_network_url(url):
+        await route.abort()
+        return
+    host = urlsplit(url).hostname or ""
+    if not await asyncio.to_thread(resolves_to_public_address, host.rstrip(".")):
+        await route.abort()
+        return
+    if not request.is_navigation_request():
+        await route.continue_()
+        return
+    # Fetch navigations without following redirects so every hop passes this
+    # handler again (the browser follows the 3xx we hand back).
+    try:
+        response = await route.fetch(max_redirects=0)
+    except PlaywrightError:
+        await route.abort()
+        return
+    location = response.headers.get("location")
+    if 300 <= response.status < 400 and location:
+        target = urlsplit(location)
+        if target.scheme and not is_safe_network_url(location):
+            await route.abort()
+            return
+    await route.fulfill(response=response)
 
 
 def email_from_mailto_href(href: str) -> str:
@@ -184,7 +280,7 @@ async def mailto_people(page, person_name="", party=None, role=None):
     return people
 
 
-async def visit_profiles(context, urls, extract, *, wait_until="domcontentloaded", settle=0.5, pause=0.3):
+async def visit_profiles(context, urls, extract, *, allowed_hosts, wait_until="domcontentloaded", settle=0.5, pause=0.3):
     """Gemensamt skelett för alla profilside-skrapare: öppnar varje URL i en
     egen flik, väntar in sidan, och samlar person-tuplerna som
     extract(page, url) returnerar. En sida som felar hoppas över tyst —
@@ -194,9 +290,15 @@ async def visit_profiles(context, urls, extract, *, wait_until="domcontentloaded
     mellan sidorna (god nätgranne)."""
     people = set()
     for url in urls:
+        if not is_trusted_profile_url(url, allowed_hosts):
+            log.warning("Skipping profile URL outside the source host allowlist")
+            continue
         page = await context.new_page()
         try:
             await page.goto(url, timeout=30000, wait_until=wait_until)
+            if not is_trusted_profile_url(page.url, allowed_hosts):
+                log.warning("Skipping profile that redirected outside the source host allowlist")
+                continue
             await asyncio.sleep(settle)
             people.update(await extract(page, url))
         except PlaywrightError:
@@ -267,7 +369,7 @@ async def scrape_netpublicator(context, namn, registry_id, board_id):
             person_name, party_from_page = await extract_person_name(p2)
             return await mailto_people(p2, person_name, party or party_from_page, role)
 
-        people = await visit_profiles(context, list(info_by_url), extract)
+        people = await visit_profiles(context, list(info_by_url), extract, allowed_hosts=trusted_profile_hosts(board_url))
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -324,7 +426,7 @@ async def scrape_troman(context, namn, org_url):
             role = await extract_troman_role(p2)
             return await mailto_people(p2, person_name, party, role)
 
-        people = await visit_profiles(context, person_urls, extract)
+        people = await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(org_url))
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -377,7 +479,7 @@ async def scrape_w3d3(context, namn, board_url):
             person_name, party = await extract_person_name(p2)
             return {(person_name, email, party, None)}
 
-        people = await visit_profiles(context, person_urls, extract, settle=0.3)
+        people = await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(board_url), settle=0.3)
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -410,7 +512,7 @@ async def scrape_fmr(context, namn, board_url):
             person_name, party = await extract_person_name(p2)
             return await mailto_people(p2, person_name, party)
 
-        people = await visit_profiles(context, person_urls, extract, wait_until="networkidle", settle=0.3)
+        people = await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(board_url), wait_until="networkidle", settle=0.3)
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -455,7 +557,7 @@ async def scrape_profilsidor(context, namn, url, link_pattern, domain):
             person_name, party = await extract_person_name(p2)
             return await collect(p2, person_name, party)
 
-        people.update(await visit_profiles(context, person_urls, extract, settle=0.2, pause=0.2))
+        people.update(await visit_profiles(context, person_urls, extract, allowed_hosts=trusted_profile_hosts(url), settle=0.2, pause=0.2))
 
     except PlaywrightError as e:
         log.error(f"{namn}: {e}")
@@ -655,16 +757,55 @@ async def scrape_mailto(context, namn, url):
     return people
 
 
+PDF_MAX_BYTES = 20 * 1024 * 1024
+PDF_MAX_PAGE_STREAM = 5 * 1024 * 1024
+
+
+def download_limited(url: str, max_bytes: int) -> bytes:
+    """Stream a download and stop at max_bytes; redirects are not followed."""
+    with requests.get(url, stream=True, timeout=(10, 60), allow_redirects=False) as response:
+        if response.status_code != 200:
+            raise ValueError(f"PDF-källan svarade med HTTP {response.status_code}")
+        declared = response.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > max_bytes:
+            raise ValueError("PDF-filen är större än 20 MiB")
+        chunks, size = [], 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            size += len(chunk)
+            if size > max_bytes:
+                raise ValueError("PDF-filen är större än 20 MiB")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+
 async def scrape_pdf_lista(context, namn, url, domain):
     """Skrapar namn+mailadress-par ur en nedladdningsbar PDF-lista. Namnet plockas
     som bästa-försök ur texten som föregår e-postadressen på samma rad."""
     people = set()
     try:
         log.info(f"{namn}: hämtar {url}")
-        response = await context.request.get(url, timeout=60000)
-        data = await response.body()
+        if not is_safe_network_url(url) or urlsplit(url).scheme != "https":
+            raise ValueError("PDF-källan måste vara en säker HTTPS-adress")
+        host = urlsplit(url).hostname or ""
+        if not await asyncio.to_thread(resolves_to_public_address, host.rstrip(".")):
+            raise ValueError("PDF-källan pekar på en icke-publik adress")
+        data = await asyncio.to_thread(download_limited, url, PDF_MAX_BYTES)
         reader = PdfReader(BytesIO(data))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        if len(reader.pages) > 500:
+            raise ValueError("PDF-filen innehåller fler än 500 sidor")
+        text_parts = []
+        remaining_chars = 5_000_000
+        for pdf_page in reader.pages:
+            if remaining_chars <= 0:
+                break
+            contents = pdf_page.get_contents()
+            if contents is not None and len(contents.get_data()) > PDF_MAX_PAGE_STREAM:
+                log.warning(f"{namn}: hoppar över PDF-sida med för stor innehållsström")
+                continue
+            page_text = (pdf_page.extract_text() or "")[:remaining_chars]
+            text_parts.append(page_text)
+            remaining_chars -= len(page_text)
+        text = "\n".join(text_parts)
         for line in text.splitlines():
             match = EMAIL_RE.search(line)
             if not match:
@@ -808,10 +949,16 @@ async def main():
             locale="sv-SE",
             timezone_id="Europe/Stockholm",
         )
+        await context.route("**/*", block_private_network_requests)
 
         for region in sources.load("regioner"):
             namn = region["namn"]
             try:
+                source_url = region.get("url")
+                if source_url and (
+                    not is_safe_network_url(source_url) or urlsplit(source_url).scheme != "https"
+                ):
+                    raise ValueError(f"{namn}: källadressen måste vara en säker HTTPS-adress")
                 if region["typ"] == "netpublicator":
                     people = await scrape_netpublicator(
                         context, namn,

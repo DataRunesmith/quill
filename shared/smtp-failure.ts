@@ -1,3 +1,7 @@
+export class SmtpError extends Error {}
+/** Network-level failure (timeout, dropped connection): retry. */
+export class SmtpTransportError extends SmtpError {}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "");
 }
@@ -25,6 +29,7 @@ export function isMailCredentialFailure(error: unknown): boolean {
 
 export function isTransientSmtpFailure(error: unknown): boolean {
   if (isMailCredentialFailure(error)) return false;
+  if (error instanceof SmtpTransportError) return true;
   const code = smtpResponseCode(error);
   return code !== null && code >= 400 && code < 500;
 }

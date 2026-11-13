@@ -51,11 +51,6 @@ async function fixture() {
     },
     async delete(key: string) {
       values.delete(key);
-      if (key.startsWith("ratelimit:") && onClear) {
-        const change = onClear;
-        onClear = undefined;
-        change();
-      }
     },
   };
   const db = {
@@ -67,7 +62,10 @@ async function fixture() {
         bind(value: string) {
           return {
             async first() {
-              if (sql === "SELECT * FROM accounts WHERE email = ?")
+              if (
+                sql === "SELECT * FROM accounts WHERE email = ?" ||
+                sql === "SELECT * FROM accounts WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))"
+              )
                 return value === account.email ? { ...account } : null;
               if (sql === "SELECT * FROM accounts WHERE id = ?")
                 return value === account.id ? { ...account } : null;
@@ -84,9 +82,25 @@ async function fixture() {
       };
     },
   };
+  // Attempt limits live in a Durable Object; clearing them happens right after
+  // a factor is verified, which is where a concurrent change is injected.
+  const rateLimiter = {
+    idFromName: (name: string) => name,
+    get: () => ({
+      async fetch(url: string) {
+        if (url.endsWith("/clear-attempts") && onClear) {
+          const change = onClear;
+          onClear = undefined;
+          change();
+        }
+        return Response.json({ allowed: true });
+      },
+    }),
+  };
   const env = {
     DB: db,
     SESSIONS: sessions,
+    RATE_LIMITER: rateLimiter,
     OAUTH_GOOGLE_CLIENT_ID: "test-client",
     OAUTH_GOOGLE_CLIENT_SECRET: "test-secret",
   } as unknown as import("../src/db.ts").Env;
@@ -97,6 +111,7 @@ async function fixture() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Origin: "https://example.com",
           ...(token ? { Cookie: `session=${token}` } : {}),
         },
         body: JSON.stringify(body),
