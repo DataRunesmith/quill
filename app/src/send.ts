@@ -253,7 +253,8 @@ async function remainingQuotaForCredential(
   const accountQueued = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM send_job_recipients r
      JOIN send_jobs j ON j.id = r.send_job_id
-     WHERE j.account_id = ? AND r.status = 'queued'`,
+     WHERE j.account_id = ? AND r.status = 'queued'
+       AND j.status IN ('pending', 'sending')`,
   )
     .bind(accountId)
     .first<{ n: number }>();
@@ -273,7 +274,8 @@ async function remainingQuotaForCredential(
   const queuedViaCredential = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM send_job_recipients r
      JOIN send_jobs j ON j.id = r.send_job_id
-     WHERE j.mail_credential_id = ? AND r.status = 'queued'`,
+     WHERE j.mail_credential_id = ? AND r.status = 'queued'
+       AND j.status IN ('pending', 'sending')`,
   )
     .bind(mailCredentialId)
     .first<{ n: number }>();
