@@ -23,7 +23,7 @@ node tools/render.mjs my-values.env build
 
 Secrets such as `MAIL_CRED_KEY` do not belong in the values file; set them with `wrangler secret put` or as container environment variables. The database is created by the files in `infra/migrations`.
 
-`docker/entrypoint.sh` renders and starts the app from environment variables in a container, with data in `/data`. The first administrator is created from `ADMIN_EMAIL`.
+`docker/entrypoint.sh` renders and starts the app from environment variables in a container, with data in `/data`. The one-time first-admin bootstrap requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` (at least 12 characters), supplied as container secrets. It creates an account only when that email does not already exist; an existing account is never promoted automatically.
 
 The contact tools:
 

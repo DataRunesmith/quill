@@ -21,28 +21,62 @@ export class CredentialRateLimiter {
   constructor(private readonly state: DurableObjectState) {}
 
   async fetch(request: Request): Promise<Response> {
-    const { capacity, refillPerMinute } = await request.json<AcquireRequest>();
-    const now = Date.now();
+    if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+    const pathname = new URL(request.url).pathname;
 
-    let bucket = await this.state.storage.get<BucketState>("bucket");
-    if (!bucket) {
-      bucket = { tokens: capacity, lastRefillMs: now };
-    }
-
-    const refillPerMs = refillPerMinute / 60_000;
-    const elapsedMs = Math.max(0, now - bucket.lastRefillMs);
-    const refilled = Math.min(capacity, bucket.tokens + elapsedMs * refillPerMs);
-
-    if (refilled >= 1) {
-      await this.state.storage.put<BucketState>("bucket", {
-        tokens: refilled - 1,
-        lastRefillMs: now,
+    if (pathname === "/attempt") {
+      const { max, windowSeconds } = await request.json<{ max: number; windowSeconds: number }>();
+      if (!Number.isSafeInteger(max) || max < 1 || !Number.isSafeInteger(windowSeconds) || windowSeconds < 1)
+        return Response.json({ error: "Invalid attempt limit" }, { status: 400 });
+      const now = Date.now();
+      const allowed = await this.state.storage.transaction(async (txn) => {
+        const current = await txn.get<{ count: number; lastAttemptMs: number }>("attempt");
+        const count =
+          !current || now - current.lastAttemptMs >= windowSeconds * 1000 ? 0 : current.count;
+        if (count >= max) return false;
+        await txn.put("attempt", { count: count + 1, lastAttemptMs: now });
+        return true;
       });
-      return Response.json({ granted: true });
+      return Response.json({ allowed });
     }
 
-    await this.state.storage.put<BucketState>("bucket", { tokens: refilled, lastRefillMs: now });
-    const msUntilNextToken = Math.ceil((1 - refilled) / refillPerMs);
-    return Response.json({ granted: false, retryAfterMs: msUntilNextToken });
+    if (pathname === "/clear-attempts") {
+      await this.state.storage.delete("attempt");
+      return Response.json({ cleared: true });
+    }
+
+    if (pathname !== "/acquire") return new Response("Not found", { status: 404 });
+    const { capacity, refillPerMinute } = await request.json<AcquireRequest>();
+    if (
+      !Number.isFinite(capacity) ||
+      capacity < 1 ||
+      !Number.isFinite(refillPerMinute) ||
+      refillPerMinute <= 0
+    ) {
+      return Response.json({ error: "Invalid token bucket parameters" }, { status: 400 });
+    }
+    const now = Date.now();
+    const result = await this.state.storage.transaction(async (txn) => {
+      const bucket =
+        (await txn.get<BucketState>("bucket")) ?? { tokens: capacity, lastRefillMs: now };
+      const refillPerMs = refillPerMinute / 60_000;
+      const elapsedMs = Math.max(0, now - bucket.lastRefillMs);
+      const refilled = Math.min(capacity, bucket.tokens + elapsedMs * refillPerMs);
+
+      if (refilled >= 1) {
+        await txn.put<BucketState>("bucket", {
+          tokens: refilled - 1,
+          lastRefillMs: now,
+        });
+        return { granted: true as const };
+      }
+
+      await txn.put<BucketState>("bucket", { tokens: refilled, lastRefillMs: now });
+      return {
+        granted: false as const,
+        retryAfterMs: Math.ceil((1 - refilled) / refillPerMs),
+      };
+    });
+    return Response.json(result);
   }
 }

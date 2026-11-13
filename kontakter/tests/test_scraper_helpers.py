@@ -37,3 +37,28 @@ def test_looks_like_name():
     assert sc._looks_like_name("Anna Ek")
     assert not sc._looks_like_name("a@b.example")
     assert not sc._looks_like_name("")
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "http://127.0.0.1/",
+        "http://127.1/",
+        "http://2130706433/",
+        "http://[::1]/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://metadata.google.internal/",
+        "https://service.local/",
+        "https://example.org:8443/",
+        "https://user:pass@example.org/",
+    ],
+)
+def test_is_safe_network_url_rejects_local_and_nonstandard_targets(url):
+    assert not sc.is_safe_network_url(url)
+
+
+def test_profile_urls_must_stay_on_the_trusted_https_host():
+    allowed = sc.trusted_profile_hosts("https://www.netpublicator.com/elected/list")
+    assert sc.is_trusted_profile_url("https://netpublicator.com/politician/1", allowed)
+    assert not sc.is_trusted_profile_url("https://evil.example/politician/1", allowed)
+    assert not sc.is_trusted_profile_url("http://www.netpublicator.com/politician/1", allowed)
