@@ -10,8 +10,10 @@
 // variables of Cloudflare Workers Builds or a container's environment.
 // Values may use \n for line breaks, or "@path" to read a file. Files in the
 // optional overlay directory are copied on top (e.g. your own images). Routes
-// whose pattern ends up empty are dropped from wrangler.jsonc. Deploy with
+// whose pattern ends up empty, and Secrets Store bindings whose store id ends
+// up empty, are dropped from wrangler.jsonc. Deploy with
 //   npx wrangler deploy --cwd <out-dir>   (quill: --cwd <out-dir>/app)
+// or use tools/deploy.sh, which renders and deploys in one step.
 import { execFileSync } from "node:child_process";
 import {
   closeSync,
@@ -265,6 +267,7 @@ let replaced = 0;
       for (const name of declared) text = text.split(`__${name}__`).join(values.get(name));
       if (entry.name === "wrangler.jsonc") {
         text = text.replace(/\{\s*"pattern":\s*""[^}]*\},?\s*/g, "");
+        text = text.replace(/\{[^{}]*"store_id":\s*""[^{}]*\},?\s*/g, "");
       }
       if (text !== before) {
         // writeSync may write less than asked, so loop until every byte is out.

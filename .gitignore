@@ -384,7 +384,8 @@ __marimo__/
 __MACOSX/
 .AppleDouble
 .LSOverride
-Icon[]
+Icon[
+]
 
 # Resource forks
 ._*
@@ -405,7 +406,8 @@ Icon[]
 .file
 .disk_label*
 lost+found
-.HFS+ Private Directory Data[]
+.HFS+ Private Directory Data[
+]
 
 # Directories potentially created on remote AFP share
 .AppleDB
@@ -606,6 +608,12 @@ coverage/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Your own values for tools/deploy.sh and tools/render.mjs, and a copy rendered
+# with them
+*.env
+!*.example.env
+/build/
 
 # Local Claude Code statusline script, kept outside the repository
 statusline.sh
