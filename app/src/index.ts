@@ -37,6 +37,7 @@ import {
   searchPublicContactsInAreas,
   getRecipientsForAreas,
   deleteAccount,
+  resumePendingAccountDeletions,
 } from "./db";
 import {
   deletePrivateContact,
@@ -169,6 +170,7 @@ export default {
   },
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(enqueuePendingUserSendJobs(env));
+    ctx.waitUntil(resumePendingAccountDeletions(env));
   },
 } satisfies ExportedHandler<Env, SendJobMessage>;
 

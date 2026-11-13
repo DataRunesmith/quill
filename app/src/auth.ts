@@ -404,7 +404,7 @@ export async function setAccountDisabled(
   disabled: boolean,
 ): Promise<void> {
   await env.DB.prepare(
-    "UPDATE accounts SET disabled = ?, security_version = security_version + 1 WHERE id = ?",
+    "UPDATE accounts SET disabled = ?, security_version = security_version + 1 WHERE id = ? AND deletion_requested_at IS NULL",
   )
     .bind(disabled ? 1 : 0, targetAccountId)
     .run();

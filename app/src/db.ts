@@ -48,6 +48,35 @@ export async function deleteAccount(env: Env, accountId: string): Promise<void> 
     if ((row?.n ?? 0) <= 1)
       throw new Error("Kan inte radera det sista admin-kontot — utse en annan administratör först");
   }
+  // Durable deletion state first: from here the account cannot log in or send,
+  // and a failed cleanup below is resumed by resumePendingAccountDeletions.
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE accounts SET disabled = 1, security_version = security_version + 1,
+         deletion_requested_at = COALESCE(deletion_requested_at, ?) WHERE id = ?`,
+    ).bind(Date.now(), accountId),
+    env.DB.prepare(
+      "UPDATE send_jobs SET status = 'aborted' WHERE account_id = ? AND status IN ('pending', 'sending')",
+    ).bind(accountId),
+  ]);
+  await purgeAccountData(env, accountId);
+}
+
+/** Retry cleanup for accounts whose deletion started but did not finish. */
+export async function resumePendingAccountDeletions(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM accounts WHERE deletion_requested_at IS NOT NULL LIMIT 10",
+  ).all<{ id: string }>();
+  for (const row of results) {
+    try {
+      await purgeAccountData(env, row.id);
+    } catch (error) {
+      console.error("Account deletion cleanup failed", row.id, error);
+    }
+  }
+}
+
+async function purgeAccountData(env: Env, accountId: string): Promise<void> {
   const { results: attachmentRows } = await env.DB.prepare(
     "SELECT r2_key FROM letter_attachments WHERE letter_id IN (SELECT id FROM letters WHERE account_id = ?)",
   )
@@ -63,6 +92,7 @@ export async function deleteAccount(env: Env, accountId: string): Promise<void> 
     env.DB.prepare(
       "DELETE FROM letter_attachments WHERE letter_id IN (SELECT id FROM letters WHERE account_id = ?)",
     ).bind(accountId),
+    env.DB.prepare("DELETE FROM send_reservations WHERE account_id = ?").bind(accountId),
     env.DB.prepare("DELETE FROM send_log WHERE account_id = ?").bind(accountId),
     env.DB.prepare("DELETE FROM send_jobs WHERE account_id = ?").bind(accountId),
     env.DB.prepare("DELETE FROM letters WHERE account_id = ?").bind(accountId),

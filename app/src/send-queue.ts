@@ -10,7 +10,7 @@ import type { SendJobMessage } from "../../shared/types";
 import { messagesPerMinuteFor } from "../../shared/provider-rates";
 import type { Env } from "./db";
 import { personalizeLetter } from "./personalize-letter";
-import { maySendQueuedRecipient } from "./send";
+import { maySendQueuedRecipient, releaseSendReservation } from "./send";
 import { decryptLetterData } from "./letter-privacy";
 
 interface CredentialRow {
@@ -144,86 +144,92 @@ async function processJobMessages(
       queueMsg.ack();
       continue;
     }
-    if (!(await waitForSendSlot(env, credentialId, credentialRow.provider))) {
-      queueMsg.retry({ delaySeconds: 30 });
-      continue;
-    }
-    // Recheck after the serialized per-credential slot is acquired so a
-    // concurrent job cannot rely on a stale pre-wait quota snapshot.
-    if (!(await maySendQueuedRecipient(env, sendJobId, m.recipientEmail, m.queuedAt))) {
-      queueMsg.ack();
-      continue;
-    }
-    const current = await env.DB.prepare(
-      `SELECT r.status,r.queued_at,r.subject,l.html_body FROM send_job_recipients r JOIN send_jobs sj ON sj.id=r.send_job_id JOIN letters l ON l.id=sj.letter_id WHERE r.send_job_id=? AND r.recipient_email=?`,
-    )
-      .bind(sendJobId, m.recipientEmail)
-      .first<{
-        status: string;
-        queued_at: number | null;
-        subject: string | null;
-        html_body: string;
-      }>();
-    if (!current || current.status !== "queued" || current.queued_at !== m.queuedAt) {
-      queueMsg.ack();
-      continue;
-    }
-    if (current.html_body !== cachedStoredBody) {
-      cachedStoredBody = current.html_body;
-      cachedLetterBody = await decryptLetterData(env, current.html_body);
-    }
-    if (!cachedLetterBody) {
-      queueMsg.ack();
-      await markJobAborted(env, sendJobId, "Brevets innehåll har raderats");
-      aborted = true;
-      continue;
-    }
-    attempted++;
     try {
-      const html = personalizeLetter(
-        cachedLetterBody,
-        m.recipientName,
-        m.recipientEmail,
-        introText,
-      );
-      await sendOneMail(
-        env,
-        credentialRow,
-        m.recipientEmail,
-        html,
-        current.subject ?? undefined,
-        attachments,
-      );
-      await logSend(env, m, "ok", null);
-      sentCount++;
-      queueMsg.ack();
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Okänt fel";
-      if (isMailCredentialFailure(err)) {
-        await recordBlockingSendError(env, m, errorMsg);
+      if (!(await waitForSendSlot(env, credentialId, credentialRow.provider))) {
+        queueMsg.retry({ delaySeconds: 30 });
+        continue;
+      }
+      // Recheck after the serialized per-credential slot is acquired so a
+      // concurrent job cannot rely on a stale pre-wait quota snapshot.
+      if (!(await maySendQueuedRecipient(env, sendJobId, m.recipientEmail, m.queuedAt))) {
         queueMsg.ack();
+        continue;
+      }
+      const current = await env.DB.prepare(
+        `SELECT r.status,r.queued_at,r.subject,l.html_body FROM send_job_recipients r JOIN send_jobs sj ON sj.id=r.send_job_id JOIN letters l ON l.id=sj.letter_id WHERE r.send_job_id=? AND r.recipient_email=?`,
+      )
+        .bind(sendJobId, m.recipientEmail)
+        .first<{
+          status: string;
+          queued_at: number | null;
+          subject: string | null;
+          html_body: string;
+        }>();
+      if (!current || current.status !== "queued" || current.queued_at !== m.queuedAt) {
+        queueMsg.ack();
+        continue;
+      }
+      if (current.html_body !== cachedStoredBody) {
+        cachedStoredBody = current.html_body;
+        cachedLetterBody = await decryptLetterData(env, current.html_body);
+      }
+      if (!cachedLetterBody) {
+        queueMsg.ack();
+        await markJobAborted(env, sendJobId, "Brevets innehåll har raderats");
         aborted = true;
         continue;
       }
-      if (isTransientSmtpFailure(err) && queueMsg.attempts < TRANSIENT_SMTP_MAX_ATTEMPTS) {
-        await recordTransientSendError(env, m, errorMsg);
-        queueMsg.retry({ delaySeconds: transientSmtpRetryDelaySeconds(queueMsg.attempts) });
-        continue;
-      }
-      bounceCount++;
-      await logSend(env, m, "bounce", errorMsg, isPermanentRecipientSmtpFailure(err));
-      queueMsg.ack();
-      if (bounceCount >= 5 && attempted >= MIN_FOR_RATE_CHECK) {
-        const rate = (bounceCount / attempted) * 100;
-        if (rate >= BOUNCE_ABORT_RATE) {
+      attempted++;
+      try {
+        const html = personalizeLetter(
+          cachedLetterBody,
+          m.recipientName,
+          m.recipientEmail,
+          introText,
+        );
+        await sendOneMail(
+          env,
+          credentialRow,
+          m.recipientEmail,
+          html,
+          current.subject ?? undefined,
+          attachments,
+        );
+        await logSend(env, m, "ok", null);
+        sentCount++;
+        queueMsg.ack();
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "Okänt fel";
+        if (isMailCredentialFailure(err)) {
+          await recordBlockingSendError(env, m, errorMsg);
+          queueMsg.ack();
           aborted = true;
-          await markJobAborted(
-            env,
-            sendJobId,
-            `Hög bounce-andel (${rate.toFixed(0)}%) — stoppat för granskning`,
-          );
+          continue;
+        }
+        if (isTransientSmtpFailure(err) && queueMsg.attempts < TRANSIENT_SMTP_MAX_ATTEMPTS) {
+          await recordTransientSendError(env, m, errorMsg);
+          queueMsg.retry({ delaySeconds: transientSmtpRetryDelaySeconds(queueMsg.attempts) });
+          continue;
+        }
+        bounceCount++;
+        await logSend(env, m, "bounce", errorMsg, isPermanentRecipientSmtpFailure(err));
+        queueMsg.ack();
+        if (bounceCount >= 5 && attempted >= MIN_FOR_RATE_CHECK) {
+          const rate = (bounceCount / attempted) * 100;
+          if (rate >= BOUNCE_ABORT_RATE) {
+            aborted = true;
+            await markJobAborted(
+              env,
+              sendJobId,
+              `Hög bounce-andel (${rate.toFixed(0)}%) — stoppat för granskning`,
+            );
+          }
         }
       }
+    } finally {
+      // Held quota is released only once the send result is logged (or the send
+      // is abandoned), so an abort elsewhere cannot free in-flight capacity.
+      await releaseSendReservation(env, sendJobId, m.recipientEmail);
     }
   }
   if (attempted > 0 || aborted)

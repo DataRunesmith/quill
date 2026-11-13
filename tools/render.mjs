@@ -122,7 +122,7 @@ if (isWithin(source, out)) {
   if (!["dist", ".wrangler", "site-docs", "build"].includes(outputRoot))
     throw new Error("An output directory inside the repository must be a dedicated generated directory (dist, .wrangler, site-docs or build).");
   try {
-    execFileSync("git", ["check-ignore", "--quiet", "--no-index", "--", outputRelative], {
+    execFileSync("git", ["check-ignore", "--quiet", "--no-index", "--", `${outputRelative}${sep}.generated`], {
       cwd: source,
       stdio: "ignore",
     });

@@ -17,7 +17,8 @@ export interface SmtpConfig {
   fromAddress: string;
 }
 
-export class SmtpError extends Error {}
+import { SmtpError, SmtpTransportError } from "./smtp-failure";
+export { SmtpError, SmtpTransportError };
 
 interface SmtpResponse {
   code: number;
@@ -197,14 +198,15 @@ async function readSmtpResponse(
   let buffer = "";
   const lines: string[] = [];
   let responseCode: number | null = null;
+  let totalBytes = 0;
   const deadline = Date.now() + 15_000;
   const decoder = new TextDecoder();
 
   while (true) {
     const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) throw new SmtpError("SMTP-servern svarade inte i tid");
+    if (remainingMs <= 0) throw new SmtpTransportError("SMTP-servern svarade inte i tid");
     const chunk = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new SmtpError("SMTP-servern svarade inte i tid")), remainingMs);
+      const timer = setTimeout(() => reject(new SmtpTransportError("SMTP-servern svarade inte i tid")), remainingMs);
       reader.read().then(
         (result) => {
           clearTimeout(timer);
@@ -216,9 +218,10 @@ async function readSmtpResponse(
         },
       );
     });
-    if (chunk.done) throw new SmtpError("Anslutningen stängdes oväntat");
+    if (chunk.done) throw new SmtpTransportError("Anslutningen stängdes oväntat");
+    totalBytes += chunk.value.byteLength;
     buffer += decoder.decode(chunk.value, { stream: true });
-    if (buffer.length > 65_536) throw new SmtpError("SMTP-serverns svar är för stort");
+    if (buffer.length > 65_536 || totalBytes > 65_536) throw new SmtpError("SMTP-serverns svar är för stort");
 
     let lineEnd = buffer.indexOf("\r\n");
     while (lineEnd !== -1) {

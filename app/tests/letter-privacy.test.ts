@@ -16,3 +16,10 @@ for (const plaintext of ["enc:v1:attacker-controlled", "redacted:v1", "<p>Vanlig
     assert.equal(await decryptLetterData(env, stored), plaintext);
   });
 }
+
+test("legacy plaintext that starts with the encryption prefix is still readable", async () => {
+  const { decryptLetterData, isEncryptedLetterData } = await import("../src/letter-privacy.ts");
+  const legacy = "enc:v1: <p>Hej, detta är ett äldre brev</p>";
+  assert.equal(isEncryptedLetterData(legacy), false);
+  assert.equal(await decryptLetterData({} as never, legacy), legacy);
+});
