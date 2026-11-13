@@ -8,7 +8,7 @@ const migration = readFileSync(
   new URL("../../infra/migrations/0007_send_reservations.sql", import.meta.url),
   "utf8",
 );
-const insert = source.match(/INSERT OR IGNORE INTO send_reservations[\s\S]*?\) < \?9\)`/)?.[0];
+const insert = source.match(/INSERT OR IGNORE INTO send_reservations[\s\S]*?\) < \?9\)(?=`)/)?.[0];
 
 test("reservation insert claims the last slot only once", () => {
   assert.ok(insert, "reservation statement present in send.ts");
