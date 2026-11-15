@@ -14,8 +14,11 @@
 
 ## Git and review
 
-- Squash merge, signed commits, auto-merge on.
-- When opening a PR, enable auto-merge with squash at creation: `gh pr merge --squash --auto`.
+- Squash merge, signed commits.
+- Merging is done by the merge queue. After creating a PR, queue it by commenting `@mergifyio queue`. Do not run `gh pr merge`.
+- Never merge, rebase or update a PR branch yourself. The merge queue updates it against main and tests it before merging.
+- Never push to main. Never force-push.
+- If a PR is dequeued or a check fails, fix it on the same branch, push, and queue it again. Do not open a replacement PR.
 - A review conversation is resolved only after the comment is read in full and the flagged code is analyzed. A confirmed defect is fixed before resolving.
 - Nothing personal in code or docs. Generic placeholders only.
 
