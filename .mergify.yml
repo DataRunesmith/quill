@@ -1,3 +1,6 @@
 queue_rules:
   - name: default
     merge_method: squash
+    merge_conditions:
+      - check-success = app
+      - check-success = kontakter
