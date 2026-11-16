@@ -313,3 +313,48 @@ test("sessions keep the account id under the legacy key and need both keys", asy
   f.values.delete(`sessionbind:${other}`);
   assert.equal(await getSessionContext(f.env, other), null);
 });
+
+test("signup for a registered address looks like a fresh signup when system mail is on", async (t) => {
+  const { signup } = await import("../src/auth.ts");
+  const sent: string[] = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    sent.push(String(init?.body ?? ""));
+    return Response.json({ id: "mail" });
+  });
+  const existing = { id: "account-a", email: "person@example.com" };
+  const env = {
+    RESEND_API_KEY: "key",
+    RATE_LIMITER: {
+      idFromName: (name: string) => name,
+      get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+    },
+    DB: {
+      prepare: () => ({ bind: () => ({ first: async () => existing }) }),
+    },
+  } as unknown as import("../src/db.ts").Env;
+  const result = await signup(env, "Person@Example.com", "long-enough-password");
+  assert.ok(result.accountId && result.accountId !== "account-a");
+  assert.equal(result.verified, undefined);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Någon försökte skapa ett konto/);
+  assert.doesNotMatch(sent[0], /\d{6}/);
+  await assert.rejects(signup(env, "person@example.com", "short"), /minst 10 tecken/);
+});
+
+test("OAuth login without the matching browser cookie is rejected", async () => {
+  const f = await fixture();
+  f.values.set("oauthstate:state", "1");
+  const response = await app.fetch(
+    new Request("https://example.com/api/oauth/google/callback?code=code&state=state"),
+    f.env,
+    f.context,
+  );
+  assert.equal(response.status, 400);
+});
+
+test("intro text containing replacement patterns is inserted literally", async () => {
+  const { personalizeLetter } = await import("../src/personalize-letter.ts");
+  const html = personalizeLetter("<p>{GREETING}</p><p>Body</p>", "Anna", "a@example.com", "Pris $& och $' kr");
+  assert.equal(html.match(/<p>Body<\/p>/g)?.length, 1);
+  assert.ok(html.includes("Pris $&amp; och $&#39; kr") || html.includes("Pris $&amp; och $' kr"));
+});

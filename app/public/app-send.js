@@ -651,6 +651,7 @@ function renderReview() {
       return notice(err.message, "error");
     }
     const val = (id) => ($(id).value.trim() ? Number($(id).value) : null);
+    let created = false;
     try {
       const d = await api("/api/send", {
         method: "POST",
@@ -665,6 +666,8 @@ function renderReview() {
           nextDailyLimit: val("#limit-after"),
         }),
       });
+      // The job exists from here on; never re-enable the button after this.
+      created = true;
       sessionStorage.removeItem("draft:subject");
       sessionStorage.removeItem("draft:body");
       state.files = [];
@@ -674,7 +677,7 @@ function renderReview() {
       state.step = 1;
       go("jobs");
     } catch (err) {
-      sendButton.disabled = false;
+      if (!created) sendButton.disabled = false;
       notice(err.message, "error");
     }
   };

@@ -142,9 +142,34 @@ export async function signup(
   password: string,
 ): Promise<{ accountId: string; verified?: true }> {
   email = normalizeAccountEmail(email);
-  const existing = await getAccountByEmail(env.DB, email);
-  if (existing) throw new Error("E-postadressen är redan registrerad");
   if (password.length < 10) throw new Error("Lösenordet måste vara minst 10 tecken");
+  const existing = await getAccountByEmail(env.DB, email);
+  if (existing) {
+    // With system e-mail the response must not reveal which addresses are
+    // registered: do the same work and answer exactly like a fresh signup. The
+    // address owner gets a notice instead of a code, so the decoy id can never
+    // be verified and a pre-registered account is recoverable via password reset.
+    if (systemMailConfigured(env)) {
+      await hashPassword(password);
+      try {
+        // Limit notices per address so signup cannot be used to mail-bomb it.
+        await enforceAttemptLimit(env, "signup-notice", email, {
+          max: 3,
+          windowSeconds: 3600,
+        });
+        await sendSystemMail(
+          env,
+          email,
+          "Någon försökte skapa ett konto — __PUBLIC_HOST__",
+          "<p>Någon försökte skapa ett konto med din e-postadress, men det finns redan ett. Om det var du kan du välja Glömt lösenord på inloggningssidan. Annars kan du bortse från det här mejlet.</p>",
+        );
+      } catch {
+        // Same outward behavior whether or not the notice could be sent.
+      }
+      return { accountId: crypto.randomUUID() };
+    }
+    throw new Error("E-postadressen är redan registrerad");
+  }
 
   const { hash, salt } = await hashPassword(password);
   const code = randomVerificationCode();
@@ -304,10 +329,10 @@ export async function resetPassword(env: Env, token: string, newPassword: string
   if (newPassword.length < 10) throw new Error("Lösenordet måste vara minst 10 tecken");
 
   const account = await env.DB.prepare(
-    "SELECT id, email, reset_expires_at FROM accounts WHERE reset_token = ?",
+    "SELECT id, email, reset_expires_at, email_verified FROM accounts WHERE reset_token = ?",
   )
     .bind(token)
-    .first<{ id: string; email: string; reset_expires_at: number }>();
+    .first<{ id: string; email: string; reset_expires_at: number; email_verified: number }>();
   if (!account || Date.now() > account.reset_expires_at) {
     throw new Error("Återställningslänken är ogiltig eller har gått ut");
   }
@@ -319,11 +344,23 @@ export async function resetPassword(env: Env, token: string, newPassword: string
   // så alla gamla sessioner blir ogiltiga vid nästa request.
   await clearAttempts(env, "login", account.email);
 
-  await env.DB.prepare(
-    "UPDATE accounts SET password_hash = ?, password_salt = ?, password_set_by_user = 1, email_verified = 1, reset_token = NULL, reset_expires_at = NULL WHERE id = ?",
-  )
-    .bind(hash, salt, account.id)
-    .run();
+  const statements = [
+    env.DB.prepare(
+      "UPDATE accounts SET password_hash = ?, password_salt = ?, password_set_by_user = 1, email_verified = 1, reset_token = NULL, reset_expires_at = NULL WHERE id = ?",
+    ).bind(hash, salt, account.id),
+  ];
+  // The address was never verified, so whoever pre-registered it may have left
+  // secrets behind. Revoke them now that the real owner takes the account over.
+  if (!account.email_verified)
+    statements.push(
+      env.DB.prepare("DELETE FROM api_keys WHERE account_id = ?").bind(account.id),
+      env.DB.prepare("DELETE FROM oauth_identities WHERE account_id = ?").bind(account.id),
+      env.DB.prepare("DELETE FROM mail_credentials WHERE account_id = ?").bind(account.id),
+      env.DB.prepare(
+        "UPDATE send_jobs SET status = 'aborted', finished_at = ? WHERE account_id = ? AND status IN ('pending', 'sending')",
+      ).bind(Date.now(), account.id),
+    );
+  await env.DB.batch(statements);
 }
 
 export async function startTotpSetup(
@@ -413,8 +450,8 @@ export async function setAccountDisabled(
   if (disabled)
     statements.push(
       env.DB.prepare(
-        "UPDATE send_jobs SET status = 'aborted' WHERE account_id = ? AND status IN ('pending', 'sending')",
-      ).bind(targetAccountId),
+        "UPDATE send_jobs SET status = 'aborted', finished_at = ? WHERE account_id = ? AND status IN ('pending', 'sending')",
+      ).bind(Date.now(), targetAccountId),
     );
   await env.DB.batch(statements);
 }

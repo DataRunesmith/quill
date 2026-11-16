@@ -1,6 +1,6 @@
 import { randomId, hashPassword } from "../../shared/crypto";
 import { validateMailboxAddress } from "../../shared/input-safety";
-import type { Env } from "./db";
+import { purgeAccountData, type Env } from "./db";
 
 interface ProviderConfig {
   authorizeUrl: string;
@@ -136,11 +136,20 @@ export async function handleOAuthCallback(
   }
 
   // Google email_verified=true is required before email-based account reuse.
-  const existingAccount = await env.DB.prepare(
+  let existingAccount = await env.DB.prepare(
     "SELECT * FROM accounts WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1",
   )
     .bind(email)
     .first<Record<string, unknown>>();
+  if (existingAccount && !existingAccount.email_verified) {
+    // Nobody has proven ownership of this address. Discard everything the
+    // pre-registering party created (password, mail credentials, jobs, linked
+    // identities) and start over with a clean account for the verified owner.
+    if (existingAccount.is_admin || existingAccount.deletion_requested_at)
+      throw new Error("Kontot måste bekräftas via e-post innan det kan användas");
+    await purgeAccountData(env, existingAccount.id as string);
+    existingAccount = null;
+  }
   if (existingAccount) {
     const accountId = existingAccount.id as string;
     const providerAlreadyLinked = await env.DB.prepare(
@@ -156,20 +165,6 @@ export async function handleOAuthCallback(
         "INSERT INTO oauth_identities (id, account_id, provider, provider_user_id, provider_email, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       )
         .bind(randomId(), accountId, provider, providerUserId, email, Date.now())
-        .run();
-    }
-    if (!existingAccount.email_verified) {
-      // The account was created by someone who never proved ownership of the
-      // address. Drop every credential set at signup so a pre-registered
-      // password cannot be used against the real owner.
-      const { hash, salt } = await hashPassword(randomId() + randomId());
-      await env.DB.prepare(
-        `UPDATE accounts SET email_verified = 1, password_hash = ?, password_salt = ?,
-           password_set_by_user = 0, verification_code = NULL, verification_expires_at = NULL,
-           reset_token = NULL, reset_expires_at = NULL, totp_secret = NULL, totp_enabled = 0,
-           security_version = security_version + 1 WHERE id = ?`,
-      )
-        .bind(hash, salt, accountId)
         .run();
     }
     return { accountId };

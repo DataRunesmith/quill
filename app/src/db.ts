@@ -76,7 +76,7 @@ export async function resumePendingAccountDeletions(env: Env): Promise<void> {
   }
 }
 
-async function purgeAccountData(env: Env, accountId: string): Promise<void> {
+export async function purgeAccountData(env: Env, accountId: string): Promise<void> {
   const { results: attachmentRows } = await env.DB.prepare(
     "SELECT r2_key FROM letter_attachments WHERE letter_id IN (SELECT id FROM letters WHERE account_id = ?)",
   )

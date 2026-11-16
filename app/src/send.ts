@@ -193,7 +193,7 @@ export async function maySendQueuedRecipient(
     .bind(job.account_id)
     .first<{ daily_send_cap: number; disabled: number }>();
   if (!account) return deferRecipient();
-  if (account.disabled) return false;
+  if (account.disabled) return deferRecipient();
 
   const credential = await env.DB.prepare(
     "SELECT daily_cap FROM mail_credentials WHERE id = ? AND account_id = ? AND revoked_at IS NULL",

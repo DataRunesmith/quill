@@ -199,10 +199,17 @@ async function processJobMessages(
         sentCount++;
         // The mail is already delivered; a failed log write must never be
         // treated as a send failure, or the message would be re-sent.
-        try {
-          await logSend(env, m, "ok", null, false, shareOutcome);
-        } catch (logErr) {
-          console.error("send log write failed after delivery", logErr);
+        for (let tries = 1; ; tries++) {
+          try {
+            await logSend(env, m, "ok", null, false, shareOutcome);
+            break;
+          } catch (logErr) {
+            if (tries >= 3) {
+              console.error("send log write failed after delivery", logErr);
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 200 * tries));
+          }
         }
         queueMsg.ack();
       } catch (err) {
