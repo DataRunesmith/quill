@@ -498,5 +498,5 @@ export async function countSentTodayForCredential(
   return r?.n ?? 0;
 }
 export async function getMailCredential(db: D1Database, id: string) {
-  return db.prepare("SELECT * FROM mail_credentials WHERE id = ?").bind(id).first();
+  return db.prepare("SELECT * FROM mail_credentials WHERE id = ? AND revoked_at IS NULL").bind(id).first();
 }

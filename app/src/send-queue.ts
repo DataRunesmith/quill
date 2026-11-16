@@ -180,6 +180,7 @@ async function processJobMessages(
         continue;
       }
       attempted++;
+      const shareOutcome = credentialRow.provider !== "generic";
       try {
         const html = personalizeLetter(
           cachedLetterBody,
@@ -195,8 +196,14 @@ async function processJobMessages(
           current.subject ?? undefined,
           attachments,
         );
-        await logSend(env, m, "ok", null);
         sentCount++;
+        // The mail is already delivered; a failed log write must never be
+        // treated as a send failure, or the message would be re-sent.
+        try {
+          await logSend(env, m, "ok", null, false, shareOutcome);
+        } catch (logErr) {
+          console.error("send log write failed after delivery", logErr);
+        }
         queueMsg.ack();
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "Okänt fel";
@@ -212,7 +219,14 @@ async function processJobMessages(
           continue;
         }
         bounceCount++;
-        await logSend(env, m, "bounce", errorMsg, isPermanentRecipientSmtpFailure(err));
+        await logSend(
+          env,
+          m,
+          "bounce",
+          errorMsg,
+          isPermanentRecipientSmtpFailure(err),
+          shareOutcome,
+        );
         queueMsg.ack();
         if (bounceCount >= 5 && attempted >= MIN_FOR_RATE_CHECK) {
           const rate = (bounceCount / attempted) * 100;
@@ -234,7 +248,7 @@ async function processJobMessages(
   }
   if (attempted > 0 || aborted)
     await env.DB.prepare(
-      `UPDATE send_jobs SET sent_count=sent_count+?,bounce_count=bounce_count+?,status=? WHERE id=?`,
+      `UPDATE send_jobs SET sent_count=sent_count+?,bounce_count=bounce_count+?,status=CASE WHEN status IN ('pending','sending') THEN ? ELSE status END WHERE id=?`,
     )
       .bind(sentCount, bounceCount, aborted ? "aborted" : "sending", sendJobId)
       .run();
@@ -326,6 +340,7 @@ async function logSend(
   status: "ok" | "bounce",
   error: string | null,
   markRecipientDead = false,
+  shareOutcome = false,
 ): Promise<void> {
   const now = Date.now();
   await env.DB.prepare(
@@ -338,6 +353,9 @@ async function logSend(
   )
     .bind(status, now, error, m.sendJobId, m.recipientEmail)
     .run();
+  // Outcomes from a user-supplied SMTP server must not change the contact
+  // registry shared by every account.
+  if (!shareOutcome) return;
   if (status === "ok")
     await env.DB.prepare(
       "UPDATE public_contacts SET verification_status='valid_via_send',last_verified_at=? WHERE email=?",

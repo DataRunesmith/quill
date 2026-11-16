@@ -704,7 +704,15 @@ async function handleRequest(req: Request, env: Env, url: URL): Promise<Response
       if (step === "start") {
         const state = randomId();
         await env.SESSIONS.put(`oauthstate:${state}`, "1", { expirationTtl: 600 });
-        return Response.redirect(getAuthorizeUrl(provider, env, state), 302);
+        // Bind the state to this browser so a callback completed elsewhere
+        // (login CSRF) is rejected.
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: getAuthorizeUrl(provider, env, state),
+            "Set-Cookie": `oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/oauth; Max-Age=600`,
+          },
+        });
       }
       const code = url.searchParams.get("code"),
         state = url.searchParams.get("state");
@@ -721,12 +729,18 @@ async function handleRequest(req: Request, env: Env, url: URL): Promise<Response
         await handleOAuthLinkCallback(provider, env, code, linkAccountId);
         return Response.redirect("https://__PUBLIC_HOST__/", 302);
       }
+      if (getCookie(req, "oauth_state") !== state)
+        return json({ error: "State tillhör en annan webbläsare — försök igen" }, 400);
       const { accountId } = await handleOAuthCallback(provider, env, code),
         sessionToken = randomId() + randomId();
       await env.SESSIONS.put(`session:${sessionToken}`, accountId, { expirationTtl: 2592000 });
       const resp = Response.redirect("https://__PUBLIC_HOST__/", 302),
         headers = new Headers(resp.headers);
-      headers.set("Set-Cookie", setSessionCookie(sessionToken));
+      headers.append("Set-Cookie", setSessionCookie(sessionToken));
+      headers.append(
+        "Set-Cookie",
+        "oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/oauth; Max-Age=0",
+      );
       return new Response(null, { status: 302, headers });
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : "OAuth-fel" }, 400);
@@ -762,6 +776,8 @@ async function handleRequest(req: Request, env: Env, url: URL): Promise<Response
       if (!stateAccountId)
         return json({ error: "Ogiltig eller utgången state — försök igen" }, 400);
       await env.SESSIONS.delete(`oauthmailstate:${state}`);
+      if (stateAccountId !== (account.id as string))
+        return json({ error: "State tillhör en annan session — försök igen" }, 400);
       await addMicrosoftGraphMailCredential(env, stateAccountId, code);
       return new Response(null, {
         status: 302,

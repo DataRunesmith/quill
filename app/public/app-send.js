@@ -630,16 +630,26 @@ function renderReview() {
     renderSend($("#root"));
   };
   $("#send-now").onclick = async () => {
+    const sendButton = $("#send-now");
+    if (sendButton.disabled) return;
     const cred = $("#credential").value;
     if (!cred) return notice("Välj mailkonto.", "error");
+    // Guard against double clicks: the API has no idempotency key, so a second
+    // request would create a duplicate job and mail every recipient twice.
+    sendButton.disabled = true;
     const attachments = [];
-    for (const f of state.files)
-      attachments.push({
-        filename: f.name,
-        contentType: f.type || "application/octet-stream",
-        mode: "attach",
-        base64Data: await file64(f),
-      });
+    try {
+      for (const f of state.files)
+        attachments.push({
+          filename: f.name,
+          contentType: f.type || "application/octet-stream",
+          mode: "attach",
+          base64Data: await file64(f),
+        });
+    } catch (err) {
+      sendButton.disabled = false;
+      return notice(err.message, "error");
+    }
     const val = (id) => ($(id).value.trim() ? Number($(id).value) : null);
     try {
       const d = await api("/api/send", {
@@ -664,6 +674,7 @@ function renderReview() {
       state.step = 1;
       go("jobs");
     } catch (err) {
+      sendButton.disabled = false;
       notice(err.message, "error");
     }
   };

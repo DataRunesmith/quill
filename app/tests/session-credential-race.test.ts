@@ -165,7 +165,9 @@ test("OAuth session upgrade preserves account checks and credential revocation",
   const callback = async () => {
     f.values.set("oauthstate:state", "1");
     return app.fetch(
-      new Request("https://example.com/api/oauth/google/callback?code=code&state=state"),
+      new Request("https://example.com/api/oauth/google/callback?code=code&state=state", {
+        headers: { Cookie: "oauth_state=state" },
+      }),
       f.env,
       f.context,
     );
@@ -286,12 +288,18 @@ test("disabling or enabling an account bumps its security version", async () => 
         statements.push(sql);
         return { bind: () => ({ run: async () => ({}) }) };
       },
+      batch: async () => [],
     },
   } as unknown as import("../src/db.ts").Env;
   await setAccountDisabled(env, "account-a", true);
+  const disableStatements = statements.length;
   await setAccountDisabled(env, "account-a", false);
-  assert.equal(statements.length, 2);
-  for (const sql of statements) assert.match(sql, /security_version = security_version \+ 1/);
+  // Disabling also aborts running send jobs; enabling only updates the account.
+  assert.equal(disableStatements, 2);
+  assert.match(statements[1], /UPDATE send_jobs SET status = 'aborted'/);
+  assert.equal(statements.length, 3);
+  for (const sql of [statements[0], statements[2]])
+    assert.match(sql, /security_version = security_version \+ 1/);
 });
 
 test("sessions keep the account id under the legacy key and need both keys", async () => {

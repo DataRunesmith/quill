@@ -320,7 +320,7 @@ export async function resetPassword(env: Env, token: string, newPassword: string
   await clearAttempts(env, "login", account.email);
 
   await env.DB.prepare(
-    "UPDATE accounts SET password_hash = ?, password_salt = ?, password_set_by_user = 1, reset_token = NULL, reset_expires_at = NULL WHERE id = ?",
+    "UPDATE accounts SET password_hash = ?, password_salt = ?, password_set_by_user = 1, email_verified = 1, reset_token = NULL, reset_expires_at = NULL WHERE id = ?",
   )
     .bind(hash, salt, account.id)
     .run();
@@ -403,11 +403,20 @@ export async function setAccountDisabled(
   targetAccountId: string,
   disabled: boolean,
 ): Promise<void> {
-  await env.DB.prepare(
-    "UPDATE accounts SET disabled = ?, security_version = security_version + 1 WHERE id = ? AND deletion_requested_at IS NULL",
-  )
-    .bind(disabled ? 1 : 0, targetAccountId)
-    .run();
+  const statements = [
+    env.DB.prepare(
+      "UPDATE accounts SET disabled = ?, security_version = security_version + 1 WHERE id = ? AND deletion_requested_at IS NULL",
+    ).bind(disabled ? 1 : 0, targetAccountId),
+  ];
+  // A disabled account must stop sending: abort its running jobs so neither
+  // queued messages nor the cron re-enqueue keep delivering mail.
+  if (disabled)
+    statements.push(
+      env.DB.prepare(
+        "UPDATE send_jobs SET status = 'aborted' WHERE account_id = ? AND status IN ('pending', 'sending')",
+      ).bind(targetAccountId),
+    );
+  await env.DB.batch(statements);
 }
 
 // Självbetjäning: kontoinnehavaren raderar sitt EGET konto permanent. Kräver

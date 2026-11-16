@@ -189,10 +189,11 @@ export async function maySendQueuedRecipient(
     return false;
   };
 
-  const account = await env.DB.prepare("SELECT daily_send_cap FROM accounts WHERE id = ?")
+  const account = await env.DB.prepare("SELECT daily_send_cap, disabled FROM accounts WHERE id = ?")
     .bind(job.account_id)
-    .first<{ daily_send_cap: number }>();
+    .first<{ daily_send_cap: number; disabled: number }>();
   if (!account) return deferRecipient();
+  if (account.disabled) return false;
 
   const credential = await env.DB.prepare(
     "SELECT daily_cap FROM mail_credentials WHERE id = ? AND account_id = ? AND revoked_at IS NULL",
@@ -746,6 +747,19 @@ async function handleSendJobAction(
 
   if (["pending", "sending"].includes(job.status)) {
     throw new Error("Avbryt utskicket innan det tas bort");
+  }
+
+  // Daily caps count today's send_log rows, so a job that sent today cannot be
+  // deleted until the next UTC day; otherwise deleting would reset the quota.
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+  const sentToday = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM send_log WHERE send_job_id = ? AND account_id = ? AND status = 'ok' AND sent_at >= ?",
+  )
+    .bind(sendJobId, accountId, startOfDay.getTime())
+    .first<{ n: number }>();
+  if ((sentToday?.n ?? 0) > 0) {
+    throw new Error("Utskicket har skickat brev i dag och kan tas bort först nästa dag");
   }
 
   await env.DB.batch([

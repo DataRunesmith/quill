@@ -159,8 +159,17 @@ export async function handleOAuthCallback(
         .run();
     }
     if (!existingAccount.email_verified) {
-      await env.DB.prepare("UPDATE accounts SET email_verified = 1 WHERE id = ?")
-        .bind(accountId)
+      // The account was created by someone who never proved ownership of the
+      // address. Drop every credential set at signup so a pre-registered
+      // password cannot be used against the real owner.
+      const { hash, salt } = await hashPassword(randomId() + randomId());
+      await env.DB.prepare(
+        `UPDATE accounts SET email_verified = 1, password_hash = ?, password_salt = ?,
+           password_set_by_user = 0, verification_code = NULL, verification_expires_at = NULL,
+           reset_token = NULL, reset_expires_at = NULL, totp_secret = NULL, totp_enabled = 0,
+           security_version = security_version + 1 WHERE id = ?`,
+      )
+        .bind(hash, salt, accountId)
         .run();
     }
     return { accountId };
