@@ -321,7 +321,7 @@ test("signup for a registered address looks like a fresh signup when system mail
     sent.push(String(init?.body ?? ""));
     return Response.json({ id: "mail" });
   });
-  const existing = { id: "account-a", email: "person@example.com" };
+  const existing = { id: "account-a", email: "person@example.com", email_verified: 1 };
   const env = {
     RESEND_API_KEY: "key",
     RATE_LIMITER: {
@@ -329,7 +329,7 @@ test("signup for a registered address looks like a fresh signup when system mail
       get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
     },
     DB: {
-      prepare: () => ({ bind: () => ({ first: async () => existing }) }),
+      prepare: () => ({ bind: () => ({ first: async () => existing, run: async () => ({}) }) }),
     },
   } as unknown as import("../src/db.ts").Env;
   const result = await signup(env, "Person@Example.com", "long-enough-password");
@@ -357,4 +357,41 @@ test("intro text containing replacement patterns is inserted literally", async (
   const html = personalizeLetter("<p>{GREETING}</p><p>Body</p>", "Anna", "a@example.com", "Pris $& och $' kr");
   assert.equal(html.match(/<p>Body<\/p>/g)?.length, 1);
   assert.ok(html.includes("Pris $&amp; och $&#39; kr") || html.includes("Pris $&amp; och $' kr"));
+});
+
+test("signup over an unverified address replaces the pending account", async (t) => {
+  const { signup } = await import("../src/auth.ts");
+  const statements: string[] = [];
+  let batches = 0;
+  t.mock.method(globalThis, "fetch", async () => Response.json({ id: "mail" }));
+  const pending = { id: "pending-a", email: "person@example.com", email_verified: 0, is_admin: 0 };
+  const stmt = (sql: string) => ({
+    bind: () => ({
+      first: async () => (sql.includes("FROM accounts") ? (batches ? null : pending) : null),
+      all: async () => ({ results: [] }),
+      run: async () => ({}),
+    }),
+  });
+  const env = {
+    RESEND_API_KEY: "key",
+    ATTACHMENTS: { delete: async () => {} },
+    RATE_LIMITER: {
+      idFromName: (name: string) => name,
+      get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+    },
+    DB: {
+      prepare: (sql: string) => {
+        statements.push(sql);
+        return stmt(sql);
+      },
+      batch: async () => {
+        batches++;
+        return [];
+      },
+    },
+  } as unknown as import("../src/db.ts").Env;
+  const result = await signup(env, "person@example.com", "long-enough-password");
+  assert.equal(batches, 1);
+  assert.ok(statements.some((sql) => sql.includes("DELETE FROM accounts WHERE id = ?")));
+  assert.ok(result.accountId && result.accountId !== "pending-a");
 });

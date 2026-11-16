@@ -30,8 +30,19 @@ test("disabled accounts are not sent for and their jobs are aborted", () => {
   assertSourceMatch(auth, /UPDATE send_jobs SET status = 'aborted', finished_at = \? WHERE account_id = \?/);
 });
 
-test("deleting a job that sent today is refused so daily caps cannot be reset", () => {
-  assertSourceMatch(send, /kan tas bort först nästa dag/);
+test("deleting a job that sent today hides it and keeps the quota rows", () => {
+  assertSourceMatch(send, /UPDATE send_jobs SET deleted_at = \?, idempotency_key = NULL WHERE id = \? AND account_id = \?/);
+  assertSourceMatch(send, /DELETE FROM send_job_recipients WHERE send_job_id = \?/);
+  assertSourceMatch(send, /sj\.deleted_at IS NULL/);
+});
+
+test("starting a send is idempotent per client key", () => {
+  assertSourceMatch(index, /findSendJobByIdempotencyKey\(c\.env, c\.accountId, idempotencyKey\)/);
+  assertSourceMatch(client, /idempotencyKey,/);
+  assert.match(
+    read("../../infra/migrations/0009_send_job_idempotency_and_soft_delete.sql"),
+    /CREATE UNIQUE INDEX idx_send_jobs_idempotency/,
+  );
 });
 
 test("revoked mail credentials cannot be selected for sending", () => {

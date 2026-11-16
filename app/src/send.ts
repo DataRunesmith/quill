@@ -584,6 +584,7 @@ export async function createAndEnqueueSendJob(
     dailyLimit?: number | null;
     switchAfterDays?: number | null;
     nextDailyLimit?: number | null;
+    idempotencyKey?: string | null;
   },
 ): Promise<{ sendJobId: string; totalRecipients: number }> {
   const account = await env.DB.prepare("SELECT daily_send_cap FROM accounts WHERE id = ?")
@@ -616,8 +617,8 @@ export async function createAndEnqueueSendJob(
     env.DB.prepare(
       `INSERT INTO send_jobs
          (id, account_id, letter_id, mail_credential_id, total_recipients, status,
-          daily_limit, next_daily_limit, limit_switch_at, intro_text, created_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+          daily_limit, next_daily_limit, limit_switch_at, intro_text, created_at, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
     ).bind(
       sendJobId,
       accountId,
@@ -629,12 +630,26 @@ export async function createAndEnqueueSendJob(
       rate.limitSwitchAt,
       storedIntroText,
       Date.now(),
+      input.idempotencyKey ?? null,
     ),
     ...stageRecipientStatements(env, sendJobId, orderedRecipients, input.subject),
   ]);
   const quota = await remainingQuotaForCredential(env, accountId, input.mailCredentialId);
   await enqueueWithinLimits(env, sendJobId, quota.remaining);
   return { sendJobId, totalRecipients: recipients.length };
+}
+
+export async function findSendJobByIdempotencyKey(
+  env: Env,
+  accountId: string,
+  key: string,
+): Promise<{ sendJobId: string; totalRecipients: number } | null> {
+  const row = await env.DB.prepare(
+    "SELECT id, total_recipients FROM send_jobs WHERE account_id = ? AND idempotency_key = ?",
+  )
+    .bind(accountId, key)
+    .first<{ id: string; total_recipients: number }>();
+  return row ? { sendJobId: row.id, totalRecipients: row.total_recipients } : null;
 }
 
 export async function getSendJobsForAccount(env: Env, accountId: string) {
@@ -655,7 +670,7 @@ export async function getSendJobsForAccount(env: Env, accountId: string) {
             l.html_body AS stored_letter_html
      FROM send_jobs sj
      JOIN letters l ON l.id = sj.letter_id
-     WHERE sj.account_id = ? ORDER BY sj.created_at DESC LIMIT 50`,
+     WHERE sj.account_id = ? AND sj.deleted_at IS NULL ORDER BY sj.created_at DESC LIMIT 50`,
   )
     .bind(now, now, now, accountId)
     .all<SendJobListRow>();
@@ -685,7 +700,7 @@ async function handleSendJobAction(
 ): Promise<Record<string, unknown>> {
   const action = input.action!;
   const job = await env.DB.prepare(
-    "SELECT id, letter_id, mail_credential_id, status, bounce_count FROM send_jobs WHERE id = ? AND account_id = ?",
+    "SELECT id, letter_id, mail_credential_id, status, bounce_count FROM send_jobs WHERE id = ? AND account_id = ? AND deleted_at IS NULL",
   )
     .bind(sendJobId, accountId)
     .first<{
@@ -749,8 +764,9 @@ async function handleSendJobAction(
     throw new Error("Avbryt utskicket innan det tas bort");
   }
 
-  // Daily caps count today's send_log rows, so a job that sent today cannot be
-  // deleted until the next UTC day; otherwise deleting would reset the quota.
+  // Daily caps count today's send_log rows, which reference the job. A job that
+  // sent today is therefore hidden and stripped of recipient data rather than
+  // removed, so deleting it can neither keep personal data nor reset the quota.
   const startOfDay = new Date();
   startOfDay.setUTCHours(0, 0, 0, 0);
   const sentToday = await env.DB.prepare(
@@ -759,7 +775,18 @@ async function handleSendJobAction(
     .bind(sendJobId, accountId, startOfDay.getTime())
     .first<{ n: number }>();
   if ((sentToday?.n ?? 0) > 0) {
-    throw new Error("Utskicket har skickat brev i dag och kan tas bort först nästa dag");
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM send_job_recipients WHERE send_job_id = ?").bind(sendJobId),
+      env.DB.prepare(
+        "UPDATE send_log SET recipient_email = '' WHERE send_job_id = ? AND account_id = ?",
+      ).bind(sendJobId, accountId),
+      env.DB.prepare("UPDATE send_jobs SET deleted_at = ?, idempotency_key = NULL WHERE id = ? AND account_id = ?").bind(
+        Date.now(),
+        sendJobId,
+        accountId,
+      ),
+    ]);
+    return { ok: true, deleted: true };
   }
 
   await env.DB.batch([
@@ -782,7 +809,7 @@ async function updateRemainingLetter(
   input: SendRateInput,
 ): Promise<Record<string, unknown>> {
   const job = await env.DB.prepare(
-    "SELECT id, letter_id, status FROM send_jobs WHERE id = ? AND account_id = ?",
+    "SELECT id, letter_id, status FROM send_jobs WHERE id = ? AND account_id = ? AND deleted_at IS NULL",
   )
     .bind(sendJobId, accountId)
     .first<{ id: string; letter_id: string; status: string }>();
@@ -826,7 +853,7 @@ export async function updateSendJobRate(
   }
 
   const job = await env.DB.prepare(
-    "SELECT id, mail_credential_id, status FROM send_jobs WHERE id = ? AND account_id = ?",
+    "SELECT id, mail_credential_id, status FROM send_jobs WHERE id = ? AND account_id = ? AND deleted_at IS NULL",
   )
     .bind(sendJobId, accountId)
     .first<{ id: string; mail_credential_id: string; status: string }>();

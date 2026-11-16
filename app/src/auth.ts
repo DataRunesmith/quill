@@ -16,6 +16,7 @@ import {
   getAccountById,
   verifyAccountEmail,
   deleteAccount,
+  purgeAccountData,
   type Env,
 } from "./db";
 import { clearAttempts, enforceAttemptLimit } from "./rate-limit";
@@ -143,14 +144,31 @@ export async function signup(
 ): Promise<{ accountId: string; verified?: true }> {
   email = normalizeAccountEmail(email);
   if (password.length < 10) throw new Error("Lösenordet måste vara minst 10 tecken");
-  const existing = await getAccountByEmail(env.DB, email);
+  let existing = await getAccountByEmail(env.DB, email);
+  if (
+    existing &&
+    !existing.email_verified &&
+    !existing.is_admin &&
+    !existing.deletion_requested_at &&
+    systemMailConfigured(env)
+  ) {
+    // Nobody has proven ownership of this address yet. Let a fresh signup
+    // replace the pending account, so a lost code can be retried and a
+    // pre-registration cannot block the real owner.
+    await purgeAccountData(env, existing.id as string);
+    existing = null;
+  }
   if (existing) {
     // With system e-mail the response must not reveal which addresses are
     // registered: do the same work and answer exactly like a fresh signup. The
     // address owner gets a notice instead of a code, so the decoy id can never
     // be verified and a pre-registered account is recoverable via password reset.
     if (systemMailConfigured(env)) {
+      // Mirror the work of a fresh signup (hash, one write, one mail) so the
+      // response time does not reveal that the address exists.
       await hashPassword(password);
+      randomVerificationCode();
+      await env.DB.prepare("UPDATE accounts SET id = id WHERE id = ?").bind(existing.id).run();
       try {
         // Limit notices per address so signup cannot be used to mail-bomb it.
         await enforceAttemptLimit(env, "signup-notice", email, {
@@ -353,12 +371,13 @@ export async function resetPassword(env: Env, token: string, newPassword: string
   // secrets behind. Revoke them now that the real owner takes the account over.
   if (!account.email_verified)
     statements.push(
+      // Jobs reference mail credentials, so remove them first (recipients cascade).
+      env.DB.prepare("DELETE FROM send_reservations WHERE account_id = ?").bind(account.id),
+      env.DB.prepare("DELETE FROM send_log WHERE account_id = ?").bind(account.id),
+      env.DB.prepare("DELETE FROM send_jobs WHERE account_id = ?").bind(account.id),
+      env.DB.prepare("DELETE FROM mail_credentials WHERE account_id = ?").bind(account.id),
       env.DB.prepare("DELETE FROM api_keys WHERE account_id = ?").bind(account.id),
       env.DB.prepare("DELETE FROM oauth_identities WHERE account_id = ?").bind(account.id),
-      env.DB.prepare("DELETE FROM mail_credentials WHERE account_id = ?").bind(account.id),
-      env.DB.prepare(
-        "UPDATE send_jobs SET status = 'aborted', finished_at = ? WHERE account_id = ? AND status IN ('pending', 'sending')",
-      ).bind(Date.now(), account.id),
     );
   await env.DB.batch(statements);
 }

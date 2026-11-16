@@ -624,6 +624,9 @@ function renderReview() {
     body = sessionStorage.getItem("draft:body") || "";
   el.innerHTML = `<div class="stack"><h2>Granska och skicka</h2><div class="kpis"><div class="kpi"><strong id="review-count">…</strong><span>Mottagare</span></div><div class="kpi"><strong>${state.credentials?.length || 0}</strong><span>Mailkonton</span></div><div class="kpi"><strong>${state.files.length}</strong><span>Bilagor</span></div></div><div class="field"><label>Skicka från</label><select class="input" id="credential"><option value="">Välj mailkonto…</option>${(state.credentials || []).map((c) => `<option value="${esc(c.id)}">${esc(c.from_address)} · ${esc(c.provider)}</option>`).join("")}</select></div><div class="card"><div class="card__title">${esc(subject || "(utan ämne)")}</div><p class="muted">${esc(body.replace(/<[^>]+>/g, " ").slice(0, 340))}</p></div><details class="details"><summary>Avancerad utskickstakt</summary><div class="grid grid--3"><div class="field"><label>Högst per dag nu</label><input class="input" id="limit-now" type="number" min="1"></div><div class="field"><label>Växla efter dagar</label><input class="input" id="switch-days" type="number" min="1"></div><div class="field"><label>Högst per dag därefter</label><input class="input" id="limit-after" type="number" min="1"></div></div></details><div class="row"><button class="button button--secondary" id="back-compose">Tillbaka</button><button class="button button--primary" id="send-now">Starta utskick</button></div></div>`;
   recipientCount();
+  // One key per review screen: a retry after a lost response returns the job
+  // that was already created instead of mailing every recipient again.
+  const idempotencyKey = crypto.randomUUID();
   $("#back-compose").onclick = () => {
     state.step = 2;
     location.hash = "send/2";
@@ -634,8 +637,7 @@ function renderReview() {
     if (sendButton.disabled) return;
     const cred = $("#credential").value;
     if (!cred) return notice("Välj mailkonto.", "error");
-    // Guard against double clicks: the API has no idempotency key, so a second
-    // request would create a duplicate job and mail every recipient twice.
+    // Guard against double clicks; the idempotency key below covers retries.
     sendButton.disabled = true;
     const attachments = [];
     try {
@@ -659,6 +661,7 @@ function renderReview() {
           letterHtml: body,
           subject: subject || undefined,
           mailCredentialId: cred,
+          idempotencyKey,
           ...filterPayload(),
           attachments,
           dailyLimit: val("#limit-now"),

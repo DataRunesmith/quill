@@ -49,6 +49,7 @@ import {
 } from "./private-contacts";
 import {
   createAndEnqueueSendJob,
+  findSendJobByIdempotencyKey,
   enqueuePendingUserSendJobs,
   getSendJobsForAccount,
   updateSendJobRate,
@@ -514,7 +515,18 @@ const AUTHED_ROUTES: RouteDef[] = [
         dailyLimit?: number | null;
         switchAfterDays?: number | null;
         nextDailyLimit?: number | null;
+        idempotencyKey?: string;
       }>();
+      if (
+        input.idempotencyKey !== undefined &&
+        !(typeof input.idempotencyKey === "string" && /^[A-Za-z0-9-]{8,64}$/.test(input.idempotencyKey))
+      )
+        throw new Error("Ogiltig idempotensnyckel");
+      const idempotencyKey = input.idempotencyKey ?? null;
+      if (idempotencyKey) {
+        const existing = await findSendJobByIdempotencyKey(c.env, c.accountId, idempotencyKey);
+        if (existing) return json(existing);
+      }
       if (typeof input.letterHtml !== "string" || !input.letterHtml.trim())
         throw new Error("Brevtext krävs");
       if (new TextEncoder().encode(input.letterHtml).byteLength > MAX_LETTER_HTML_BYTES)
@@ -554,9 +566,15 @@ const AUTHED_ROUTES: RouteDef[] = [
         dailyLimit: input.dailyLimit,
         switchAfterDays: input.switchAfterDays,
         nextDailyLimit: input.nextDailyLimit,
+        idempotencyKey,
         });
       } catch (error) {
         await cleanupUnqueuedLetter(c.env, letterId);
+        // A concurrent request with the same key may have created the job first.
+        const existing = idempotencyKey
+          ? await findSendJobByIdempotencyKey(c.env, c.accountId, idempotencyKey)
+          : null;
+        if (existing) return json(existing);
         throw error;
       }
       const retentionMs = requestedRetentionMs(c.req);
