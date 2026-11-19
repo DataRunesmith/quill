@@ -165,7 +165,9 @@ test("OAuth session upgrade preserves account checks and credential revocation",
   const callback = async () => {
     f.values.set("oauthstate:state", "1");
     return app.fetch(
-      new Request("https://example.com/api/oauth/google/callback?code=code&state=state"),
+      new Request("https://example.com/api/oauth/google/callback?code=code&state=state", {
+        headers: { Cookie: "oauth_state=state" },
+      }),
       f.env,
       f.context,
     );
@@ -286,12 +288,18 @@ test("disabling or enabling an account bumps its security version", async () => 
         statements.push(sql);
         return { bind: () => ({ run: async () => ({}) }) };
       },
+      batch: async () => [],
     },
   } as unknown as import("../src/db.ts").Env;
   await setAccountDisabled(env, "account-a", true);
+  const disableStatements = statements.length;
   await setAccountDisabled(env, "account-a", false);
-  assert.equal(statements.length, 2);
-  for (const sql of statements) assert.match(sql, /security_version = security_version \+ 1/);
+  // Disabling also aborts running send jobs; enabling only updates the account.
+  assert.equal(disableStatements, 2);
+  assert.match(statements[1], /UPDATE send_jobs SET status = 'aborted'/);
+  assert.equal(statements.length, 3);
+  for (const sql of [statements[0], statements[2]])
+    assert.match(sql, /security_version = security_version \+ 1/);
 });
 
 test("sessions keep the account id under the legacy key and need both keys", async () => {
@@ -304,4 +312,86 @@ test("sessions keep the account id under the legacy key and need both keys", asy
   const other = await f.login();
   f.values.delete(`sessionbind:${other}`);
   assert.equal(await getSessionContext(f.env, other), null);
+});
+
+test("signup for a registered address looks like a fresh signup when system mail is on", async (t) => {
+  const { signup } = await import("../src/auth.ts");
+  const sent: string[] = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    sent.push(String(init?.body ?? ""));
+    return Response.json({ id: "mail" });
+  });
+  const existing = { id: "account-a", email: "person@example.com", email_verified: 1 };
+  const env = {
+    RESEND_API_KEY: "key",
+    RATE_LIMITER: {
+      idFromName: (name: string) => name,
+      get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+    },
+    DB: {
+      prepare: () => ({ bind: () => ({ first: async () => existing, run: async () => ({}) }) }),
+    },
+  } as unknown as import("../src/db.ts").Env;
+  const result = await signup(env, "Person@Example.com", "long-enough-password");
+  assert.ok(result.accountId && result.accountId !== "account-a");
+  assert.equal(result.verified, undefined);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /Någon försökte skapa ett konto/);
+  assert.doesNotMatch(sent[0], /\d{6}/);
+  await assert.rejects(signup(env, "person@example.com", "short"), /minst 10 tecken/);
+});
+
+test("OAuth login without the matching browser cookie is rejected", async () => {
+  const f = await fixture();
+  f.values.set("oauthstate:state", "1");
+  const response = await app.fetch(
+    new Request("https://example.com/api/oauth/google/callback?code=code&state=state"),
+    f.env,
+    f.context,
+  );
+  assert.equal(response.status, 400);
+});
+
+test("intro text containing replacement patterns is inserted literally", async () => {
+  const { personalizeLetter } = await import("../src/personalize-letter.ts");
+  const html = personalizeLetter("<p>{GREETING}</p><p>Body</p>", "Anna", "a@example.com", "Pris $& och $' kr");
+  assert.equal(html.match(/<p>Body<\/p>/g)?.length, 1);
+  assert.ok(html.includes("Pris $&amp; och $&#39; kr") || html.includes("Pris $&amp; och $' kr"));
+});
+
+test("signup over an unverified address replaces the pending account", async (t) => {
+  const { signup } = await import("../src/auth.ts");
+  const statements: string[] = [];
+  let batches = 0;
+  t.mock.method(globalThis, "fetch", async () => Response.json({ id: "mail" }));
+  const pending = { id: "pending-a", email: "person@example.com", email_verified: 0, is_admin: 0 };
+  const stmt = (sql: string) => ({
+    bind: () => ({
+      first: async () => (sql.includes("FROM accounts") ? (batches ? null : pending) : null),
+      all: async () => ({ results: [] }),
+      run: async () => ({}),
+    }),
+  });
+  const env = {
+    RESEND_API_KEY: "key",
+    ATTACHMENTS: { delete: async () => {} },
+    RATE_LIMITER: {
+      idFromName: (name: string) => name,
+      get: () => ({ fetch: async () => Response.json({ allowed: true }) }),
+    },
+    DB: {
+      prepare: (sql: string) => {
+        statements.push(sql);
+        return stmt(sql);
+      },
+      batch: async () => {
+        batches++;
+        return [];
+      },
+    },
+  } as unknown as import("../src/db.ts").Env;
+  const result = await signup(env, "person@example.com", "long-enough-password");
+  assert.equal(batches, 1);
+  assert.ok(statements.some((sql) => sql.includes("DELETE FROM accounts WHERE id = ?")));
+  assert.ok(result.accountId && result.accountId !== "pending-a");
 });

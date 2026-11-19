@@ -30,12 +30,12 @@ export function personalizeLetter(
   const greetingWithIntro = safeIntro ? `${safeGreeting}<br><br>${safeIntro}` : safeGreeting;
 
   if (/\{GREETING\}/i.test(bodyHtml)) {
-    return bodyHtml.replace(/\{GREETING\}/gi, greetingWithIntro);
+    return bodyHtml.replace(/\{GREETING\}/gi, () => greetingWithIntro);
   }
 
   // Bakåtkompatibilitet med äldre utkast från tidigare versioner.
   if (/Hej\s+\[förnamn\]!/i.test(bodyHtml)) {
-    return bodyHtml.replace(/Hej\s+\[förnamn\]!/gi, greetingWithIntro);
+    return bodyHtml.replace(/Hej\s+\[förnamn\]!/gi, () => greetingWithIntro);
   }
 
   const introBlock = safeIntro ? `\n<p>${safeIntro}</p>` : "";

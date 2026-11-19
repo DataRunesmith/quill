@@ -49,6 +49,7 @@ import {
 } from "./private-contacts";
 import {
   createAndEnqueueSendJob,
+  findSendJobByIdempotencyKey,
   enqueuePendingUserSendJobs,
   getSendJobsForAccount,
   updateSendJobRate,
@@ -514,7 +515,18 @@ const AUTHED_ROUTES: RouteDef[] = [
         dailyLimit?: number | null;
         switchAfterDays?: number | null;
         nextDailyLimit?: number | null;
+        idempotencyKey?: string;
       }>();
+      if (
+        input.idempotencyKey !== undefined &&
+        !(typeof input.idempotencyKey === "string" && /^[A-Za-z0-9-]{8,64}$/.test(input.idempotencyKey))
+      )
+        throw new Error("Ogiltig idempotensnyckel");
+      const idempotencyKey = input.idempotencyKey ?? null;
+      if (idempotencyKey) {
+        const existing = await findSendJobByIdempotencyKey(c.env, c.accountId, idempotencyKey);
+        if (existing) return json(existing);
+      }
       if (typeof input.letterHtml !== "string" || !input.letterHtml.trim())
         throw new Error("Brevtext krävs");
       if (new TextEncoder().encode(input.letterHtml).byteLength > MAX_LETTER_HTML_BYTES)
@@ -554,9 +566,15 @@ const AUTHED_ROUTES: RouteDef[] = [
         dailyLimit: input.dailyLimit,
         switchAfterDays: input.switchAfterDays,
         nextDailyLimit: input.nextDailyLimit,
+        idempotencyKey,
         });
       } catch (error) {
         await cleanupUnqueuedLetter(c.env, letterId);
+        // A concurrent request with the same key may have created the job first.
+        const existing = idempotencyKey
+          ? await findSendJobByIdempotencyKey(c.env, c.accountId, idempotencyKey)
+          : null;
+        if (existing) return json(existing);
         throw error;
       }
       const retentionMs = requestedRetentionMs(c.req);
@@ -704,7 +722,15 @@ async function handleRequest(req: Request, env: Env, url: URL): Promise<Response
       if (step === "start") {
         const state = randomId();
         await env.SESSIONS.put(`oauthstate:${state}`, "1", { expirationTtl: 600 });
-        return Response.redirect(getAuthorizeUrl(provider, env, state), 302);
+        // Bind the state to this browser so a callback completed elsewhere
+        // (login CSRF) is rejected.
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: getAuthorizeUrl(provider, env, state),
+            "Set-Cookie": `oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/oauth; Max-Age=600`,
+          },
+        });
       }
       const code = url.searchParams.get("code"),
         state = url.searchParams.get("state");
@@ -721,12 +747,18 @@ async function handleRequest(req: Request, env: Env, url: URL): Promise<Response
         await handleOAuthLinkCallback(provider, env, code, linkAccountId);
         return Response.redirect("https://__PUBLIC_HOST__/", 302);
       }
+      if (getCookie(req, "oauth_state") !== state)
+        return json({ error: "State tillhör en annan webbläsare — försök igen" }, 400);
       const { accountId } = await handleOAuthCallback(provider, env, code),
         sessionToken = randomId() + randomId();
       await env.SESSIONS.put(`session:${sessionToken}`, accountId, { expirationTtl: 2592000 });
       const resp = Response.redirect("https://__PUBLIC_HOST__/", 302),
         headers = new Headers(resp.headers);
-      headers.set("Set-Cookie", setSessionCookie(sessionToken));
+      headers.append("Set-Cookie", setSessionCookie(sessionToken));
+      headers.append(
+        "Set-Cookie",
+        "oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/oauth; Max-Age=0",
+      );
       return new Response(null, { status: 302, headers });
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : "OAuth-fel" }, 400);
@@ -762,6 +794,8 @@ async function handleRequest(req: Request, env: Env, url: URL): Promise<Response
       if (!stateAccountId)
         return json({ error: "Ogiltig eller utgången state — försök igen" }, 400);
       await env.SESSIONS.delete(`oauthmailstate:${state}`);
+      if (stateAccountId !== (account.id as string))
+        return json({ error: "State tillhör en annan session — försök igen" }, 400);
       await addMicrosoftGraphMailCredential(env, stateAccountId, code);
       return new Response(null, {
         status: 302,
